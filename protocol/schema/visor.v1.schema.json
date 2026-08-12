@@ -1,0 +1,1049 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://codex-commander.local/schema/visor.v1.schema.json",
+  "title": "CodeX Commander visor.v1 protocol",
+  "definitions": {
+    "clientControlMessage": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "hello"
+            },
+            "protocol": {
+              "type": "string",
+              "const": "visor.v1"
+            },
+            "requestId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "deviceId": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 160
+            },
+            "deviceName": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            },
+            "appVersion": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40
+            },
+            "token": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 512
+            },
+            "pairingCode": {
+              "type": "string",
+              "pattern": "^\\d{6}$"
+            },
+            "lastEventId": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          "required": [
+            "type",
+            "protocol",
+            "requestId",
+            "deviceId",
+            "deviceName",
+            "appVersion"
+          ],
+          "additionalProperties": false,
+          "oneOf": [
+            {
+              "required": [
+                "token"
+              ],
+              "not": {
+                "required": [
+                  "pairingCode"
+                ]
+              }
+            },
+            {
+              "required": [
+                "pairingCode"
+              ],
+              "not": {
+                "required": [
+                  "token"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "state_sync"
+            },
+            "requestId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "lastEventId": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "type",
+            "requestId",
+            "lastEventId"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "ptt_start"
+            },
+            "requestId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "sampleRate": {
+              "type": "number",
+              "const": 24000
+            },
+            "channels": {
+              "type": "number",
+              "const": 1
+            },
+            "encoding": {
+              "type": "string",
+              "const": "pcm16le"
+            }
+          },
+          "required": [
+            "type",
+            "requestId",
+            "sampleRate",
+            "channels",
+            "encoding"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "ptt_end"
+            },
+            "requestId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "type",
+            "requestId"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "task_select"
+            },
+            "requestId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "threadId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            }
+          },
+          "required": [
+            "type",
+            "requestId",
+            "threadId"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "task_command"
+            },
+            "requestId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 20000
+            },
+            "threadId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            }
+          },
+          "required": [
+            "type",
+            "requestId",
+            "text"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "task_interrupt"
+            },
+            "requestId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "threadId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            }
+          },
+          "required": [
+            "type",
+            "requestId"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "approval_decision"
+            },
+            "requestId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "approvalRequestId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "decision": {
+              "type": "string",
+              "enum": [
+                "accept",
+                "decline",
+                "cancel"
+              ]
+            },
+            "physicalConfirmation": {
+              "type": "boolean",
+              "const": true
+            }
+          },
+          "required": [
+            "type",
+            "requestId",
+            "approvalRequestId",
+            "decision",
+            "physicalConfirmation"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "report_request"
+            },
+            "requestId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "threadId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            }
+          },
+          "required": [
+            "type",
+            "requestId"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "image_request"
+            },
+            "requestId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "title": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            }
+          },
+          "required": [
+            "type",
+            "requestId",
+            "path"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "ping"
+            },
+            "requestId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "sentAt": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "type",
+            "requestId",
+            "sentAt"
+          ],
+          "additionalProperties": false
+        }
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "serverControlMessage": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "protocol": {
+              "type": "string",
+              "const": "visor.v1"
+            },
+            "eventId": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "sentAt": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "hello_ack"
+            },
+            "requestId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "deviceToken": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 512
+            },
+            "bridgeVersion": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40
+            },
+            "audioSampleRate": {
+              "type": "number",
+              "const": 24000
+            }
+          },
+          "required": [
+            "protocol",
+            "eventId",
+            "sentAt",
+            "type",
+            "requestId",
+            "bridgeVersion",
+            "audioSampleRate"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "protocol": {
+              "type": "string",
+              "const": "visor.v1"
+            },
+            "eventId": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "sentAt": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "state_sync"
+            },
+            "selectedThreadId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "activeTurnId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "threads": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 240
+                  },
+                  "preview": {
+                    "type": "string",
+                    "maxLength": 1000,
+                    "default": ""
+                  },
+                  "cwd": {
+                    "type": "string",
+                    "maxLength": 2048
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "idle",
+                      "working",
+                      "waiting_approval",
+                      "failed",
+                      "unknown"
+                    ]
+                  },
+                  "updatedAt": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "id",
+                  "title",
+                  "status"
+                ],
+                "additionalProperties": false
+              },
+              "maxItems": 100
+            },
+            "pendingApproval": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "requestId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 160
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "command",
+                        "file_change"
+                      ]
+                    },
+                    "title": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 120
+                    },
+                    "detail": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4000
+                    },
+                    "threadId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 160
+                    },
+                    "turnId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 160
+                    },
+                    "expiresAt": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "requestId",
+                    "kind",
+                    "title",
+                    "detail",
+                    "threadId",
+                    "turnId",
+                    "expiresAt"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "latestSummary": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 16000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "images": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                  },
+                  "url": {
+                    "type": "string",
+                    "pattern": "^\\/media\\/"
+                  },
+                  "width": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  "height": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  "mimeType": {
+                    "type": "string",
+                    "const": "image/webp"
+                  }
+                },
+                "required": [
+                  "id",
+                  "title",
+                  "url",
+                  "width",
+                  "height",
+                  "mimeType"
+                ],
+                "additionalProperties": false
+              },
+              "maxItems": 20
+            }
+          },
+          "required": [
+            "protocol",
+            "eventId",
+            "sentAt",
+            "type",
+            "selectedThreadId",
+            "activeTurnId",
+            "threads",
+            "pendingApproval",
+            "latestSummary",
+            "images"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "protocol": {
+              "type": "string",
+              "const": "visor.v1"
+            },
+            "eventId": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "sentAt": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "task_event"
+            },
+            "threadId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "turnId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "phase": {
+              "type": "string",
+              "enum": [
+                "queued",
+                "working",
+                "progress",
+                "waiting_approval",
+                "completed",
+                "interrupted",
+                "failed"
+              ]
+            },
+            "message": {
+              "type": "string",
+              "maxLength": 4000
+            },
+            "final": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          "required": [
+            "protocol",
+            "eventId",
+            "sentAt",
+            "type",
+            "threadId",
+            "turnId",
+            "phase",
+            "message"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "protocol": {
+              "type": "string",
+              "const": "visor.v1"
+            },
+            "eventId": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "sentAt": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "assistant_audio_start"
+            },
+            "sampleRate": {
+              "type": "number",
+              "const": 24000
+            },
+            "channels": {
+              "type": "number",
+              "const": 1
+            },
+            "encoding": {
+              "type": "string",
+              "const": "pcm16le"
+            }
+          },
+          "required": [
+            "protocol",
+            "eventId",
+            "sentAt",
+            "type",
+            "sampleRate",
+            "channels",
+            "encoding"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "protocol": {
+              "type": "string",
+              "const": "visor.v1"
+            },
+            "eventId": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "sentAt": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "assistant_audio_end"
+            },
+            "transcript": {
+              "type": "string",
+              "maxLength": 16000
+            }
+          },
+          "required": [
+            "protocol",
+            "eventId",
+            "sentAt",
+            "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "protocol": {
+              "type": "string",
+              "const": "visor.v1"
+            },
+            "eventId": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "sentAt": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "approval_request"
+            },
+            "approval": {
+              "type": "object",
+              "properties": {
+                "requestId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "command",
+                    "file_change"
+                  ]
+                },
+                "title": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120
+                },
+                "detail": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4000
+                },
+                "threadId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160
+                },
+                "turnId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160
+                },
+                "expiresAt": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "requestId",
+                "kind",
+                "title",
+                "detail",
+                "threadId",
+                "turnId",
+                "expiresAt"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "protocol",
+            "eventId",
+            "sentAt",
+            "type",
+            "approval"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "protocol": {
+              "type": "string",
+              "const": "visor.v1"
+            },
+            "eventId": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "sentAt": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "approval_resolved"
+            },
+            "approvalRequestId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "resolution": {
+              "type": "string",
+              "enum": [
+                "accept",
+                "decline",
+                "cancel",
+                "expired",
+                "resolved_elsewhere"
+              ]
+            }
+          },
+          "required": [
+            "protocol",
+            "eventId",
+            "sentAt",
+            "type",
+            "approvalRequestId",
+            "resolution"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "protocol": {
+              "type": "string",
+              "const": "visor.v1"
+            },
+            "eventId": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "sentAt": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "image_card"
+            },
+            "image": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160
+                },
+                "title": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160
+                },
+                "url": {
+                  "type": "string",
+                  "pattern": "^\\/media\\/"
+                },
+                "width": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                },
+                "height": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                },
+                "mimeType": {
+                  "type": "string",
+                  "const": "image/webp"
+                }
+              },
+              "required": [
+                "id",
+                "title",
+                "url",
+                "width",
+                "height",
+                "mimeType"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "protocol",
+            "eventId",
+            "sentAt",
+            "type",
+            "image"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "protocol": {
+              "type": "string",
+              "const": "visor.v1"
+            },
+            "eventId": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "sentAt": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "error"
+            },
+            "code": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000
+            },
+            "recoverable": {
+              "type": "boolean"
+            },
+            "requestId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "protocol",
+            "eventId",
+            "sentAt",
+            "type",
+            "code",
+            "message",
+            "recoverable"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "protocol": {
+              "type": "string",
+              "const": "visor.v1"
+            },
+            "eventId": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "sentAt": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "pong"
+            },
+            "requestId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "echoedSentAt": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "protocol",
+            "eventId",
+            "sentAt",
+            "type",
+            "requestId",
+            "echoedSentAt"
+          ],
+          "additionalProperties": false
+        }
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  }
+}

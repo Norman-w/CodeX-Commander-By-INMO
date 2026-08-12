@@ -1,0 +1,30 @@
+{
+  "name": "@codex-commander/mac-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "pnpm generate:codex && tsc -p tsconfig.json",
+    "dev": "tsx watch src/index.ts",
+    "generate:codex": "node scripts/generate-codex-types.mjs",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "typecheck": "pnpm generate:codex && tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@codex-commander/protocol": "workspace:*",
+    "dotenv": "^16.6.1",
+    "sharp": "^0.34.3",
+    "ws": "^8.18.3",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.11",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}
+
