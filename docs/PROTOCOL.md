@@ -31,6 +31,7 @@ Zod 是运行时验证的最终权威；生成的 Draft-07 JSON Schema 供跨语
 ## 安全不变量
 
 - `approval_decision.physicalConfirmation` 必须为 JSON `true`。
+- 审批卡 `kind` 支持 `command`、`file_change` 与 `permissions`；额外权限批准只回传原请求的受限子集，Bridge 固定使用 turn 级作用域。
 - Realtime 的工具集合中没有审批操作。
 - 图片 URL 只能是 `/media/<24位hex>.webp`，下载还需设备 token。
 - Zod 在 Mac 边界校验每个控制消息，Kotlin 忽略未来字段以便向前兼容。

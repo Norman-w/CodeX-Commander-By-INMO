@@ -8,6 +8,10 @@ input.on("line", (line) => {
     send({ id: message.id, result: { userAgent: "fake-codex" } });
     return;
   }
+  if (message.method === "account/read") {
+    send({ id: message.id, result: { account: { type: "chatgpt", email: null, planType: "plus" }, requiresOpenaiAuth: true } });
+    return;
+  }
   if (message.method === "test/echo") {
     send({ id: message.id, result: { echoed: message.params?.value } });
     send({ method: "test/notification", params: { ready: true } });
@@ -20,4 +24,3 @@ input.on("line", (line) => {
 function send(value) {
   process.stdout.write(`${JSON.stringify(value)}\n`);
 }
-

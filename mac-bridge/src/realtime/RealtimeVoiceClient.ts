@@ -6,6 +6,7 @@ import { z } from "zod";
 import { AUDIO_SAMPLE_RATE } from "@codex-commander/protocol";
 
 import type { Logger } from "../log.js";
+import { sanitizeForVisor } from "../privacy/VisorText.js";
 
 export type VoiceToolName = "list_tasks" | "select_task" | "send_command" | "interrupt_task" | "get_status" | "read_summary" | "show_image";
 export type VoiceToolHandler = (name: VoiceToolName, argumentsValue: unknown) => Promise<unknown>;
@@ -46,7 +47,7 @@ export class RealtimeVoiceClient extends EventEmitter {
   isConfigured(): boolean { return Boolean(this.config.apiKey); }
 
   async beginInput(): Promise<void> {
-    if (!this.config.apiKey) throw new Error("OPENAI_API_KEY is not configured on the Mac bridge");
+    if (!this.config.apiKey) throw new VoiceClientError("realtime_not_configured", "Mac 尚未配置 OpenAI API Key");
     this.inputStarted = true;
     this.inputEverHadAudio = false;
     this.inputAudioBytes = 0;
@@ -90,12 +91,12 @@ export class RealtimeVoiceClient extends EventEmitter {
   }
 
   async endInput(): Promise<void> {
-    if (!this.inputStarted) throw new Error("PTT input is not active");
+    if (!this.inputStarted) throw new VoiceClientError("ptt_not_active", "当前没有正在录音的语音");
     this.inputStarted = false;
     this.inputReady = false;
     if (!this.inputEverHadAudio || this.inputAudioBytes < MIN_INPUT_AUDIO_BYTES) {
       this.send({ type: "input_audio_buffer.clear" });
-      throw new Error("PTT input is shorter than 100 ms");
+      throw new VoiceClientError("ptt_too_short", "说话时间太短，请按住后再说");
     }
     this.send({ type: "input_audio_buffer.commit" });
     this.send({ type: "response.create" });
@@ -122,7 +123,7 @@ export class RealtimeVoiceClient extends EventEmitter {
         input: [],
         tools: [],
         tool_choice: "none",
-        instructions: `请用简洁自然的中文口头汇报下面内容，不要新增事实，不要读 Markdown 标记。\n\n${summary}`
+        instructions: `请用简洁自然的中文口头汇报下面内容，不要新增事实，不要读 Markdown、密钥或本机绝对路径。\n\n${sanitizeSpokenSummary(summary)}`
       }
     });
     this.touch();
@@ -145,7 +146,7 @@ export class RealtimeVoiceClient extends EventEmitter {
   }
 
   private async ensureConnected(): Promise<void> {
-    if (!this.config.apiKey) throw new Error("OPENAI_API_KEY is not configured on the Mac bridge");
+    if (!this.config.apiKey) throw new VoiceClientError("realtime_not_configured", "Mac 尚未配置 OpenAI API Key");
     if (this.socket?.readyState === WebSocket.OPEN) return;
     if (this.connectPromise) return this.connectPromise;
     this.connectPromise = new Promise<void>((resolve, reject) => {
@@ -189,11 +190,12 @@ export class RealtimeVoiceClient extends EventEmitter {
               output: { format: { type: "audio/pcm" }, voice: this.config.voice }
             },
             instructions: [
-              "你是 CodeX Commander 的中文语音管家。回答必须简短，适合智能眼镜收听。",
-              "涉及开发工作时使用 send_command，不要声称已经执行尚未调用的操作。",
-              "你可以查询、选择、中断任务和读取汇报。",
-              "你永远不能批准 Codex 的命令或文件修改；审批只能由用户在眼镜上物理确认。",
-              "如用户只是闲聊，可直接回答；如目标不清楚，先问一个简短问题。"
+              "你是眼镜里的 Codex 遥控助手。用自然、直接的中文回答，通常不超过两句，不使用客服腔或营销话术。",
+              "用户给出明确的开发指令时，立即调用 send_command；工具成功后只需确认已交给 Codex，并简述当前状态。",
+              "不要把尚未调用工具的事说成已经执行，也不要在任务真正完成前声称完成。",
+              "你可以查询、选择、中断任务、读取汇报和请求显示图片。目标不清楚且会影响执行时，只问一个简短问题。",
+              "你永远不能批准 Codex 的命令、文件修改或额外权限；审批只能由用户在眼镜上物理确认。",
+              "如工具返回错误，用一句话说明用户下一步能做什么；不要朗读错误代码、路径或 Markdown 标记。"
             ].join("\n"),
             tools: voiceTools,
             tool_choice: "auto"
@@ -289,6 +291,12 @@ export class RealtimeVoiceClient extends EventEmitter {
   }
 }
 
+export class VoiceClientError extends Error {
+  constructor(readonly code: string, message: string) {
+    super(message);
+  }
+}
+
 // Five seconds is enough for a cold Realtime handshake while keeping memory bounded.
 const MAX_PENDING_AUDIO_BYTES = AUDIO_SAMPLE_RATE * 2 * 5;
 const MIN_INPUT_AUDIO_BYTES = AUDIO_SAMPLE_RATE * 2 / 10;
@@ -305,4 +313,8 @@ const voiceTools = [
 
 function tool(name: string, description: string, properties: Record<string, unknown>, required: string[] = []) {
   return { type: "function", name, description, parameters: { type: "object", properties, required, additionalProperties: false } };
+}
+
+function sanitizeSpokenSummary(value: string): string {
+  return sanitizeForVisor(value, 16_000);
 }

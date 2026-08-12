@@ -1,5 +1,6 @@
 package com.codexcommander.inmo.ui
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -29,26 +30,50 @@ class CommanderHudView @JvmOverloads constructor(
     private var state = HudState()
     private var holdStarted = false
     private var swiping = false
+    private var suppressTapConfirmation = false
+    private var firstTapApprovalRequestId: String? = null
     private var touchDownX = 0f
     private var touchDownY = 0f
     private val startHold = Runnable {
-        if (!swiping && state.pttMode == PttMode.HOLD && state.pendingApproval == null) {
-            holdStarted = controller?.onPttDown()?.name == "START"
-            if (holdStarted) performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
+        if (
+            !swiping &&
+            (state.pttMode == PttMode.HOLD || state.completionAwaitingReport) &&
+            state.pendingApproval == null &&
+            !state.imageVisible
+        ) {
+            if (state.completionAwaitingReport) suppressTapConfirmation = true
+            controller?.onPttDown()
+            holdStarted = controller?.state?.value?.listening == true
+            if (holdStarted) {
+                suppressTapConfirmation = true
+                performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
+            }
         }
     }
 
     private val gestures = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onDown(event: MotionEvent): Boolean = true
 
+        override fun onSingleTapUp(event: MotionEvent): Boolean {
+            state.pendingApproval?.requestId?.let { firstTapApprovalRequestId = it }
+            return super.onSingleTapUp(event)
+        }
+
         override fun onSingleTapConfirmed(event: MotionEvent): Boolean {
-            controller?.onSingleTap()
-            return true
+            if (suppressTapConfirmation) {
+                suppressTapConfirmation = false
+                return true
+            }
+            return performClick()
         }
 
         override fun onDoubleTap(event: MotionEvent): Boolean {
-            controller?.onDoubleTap()
-            performHapticFeedback(android.view.HapticFeedbackConstants.CONFIRM)
+            val requestId = firstTapApprovalRequestId
+            firstTapApprovalRequestId = null
+            if (requestId == null || state.pendingApproval?.requestId == requestId) {
+                controller?.onDoubleTap(requestId)
+                performHapticFeedback(android.view.HapticFeedbackConstants.CONFIRM)
+            }
             return true
         }
 
@@ -73,6 +98,8 @@ class CommanderHudView @JvmOverloads constructor(
         setBackgroundColor(Color.BLACK)
         isFocusable = true
         isFocusableInTouchMode = true
+        isClickable = true
+        isLongClickable = true
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
     }
 
@@ -81,6 +108,9 @@ class CommanderHudView @JvmOverloads constructor(
     }
 
     fun render(value: HudState) {
+        if (state.pendingApproval?.requestId != value.pendingApproval?.requestId) {
+            firstTapApprovalRequestId = null
+        }
         state = value
         contentDescription = accessibilityDescription(value)
         invalidate()
@@ -98,10 +128,22 @@ class CommanderHudView @JvmOverloads constructor(
         when {
             state.pendingApproval != null -> drawApproval(canvas, left, right, top + sp(34), bottom)
             state.imageVisible -> drawImage(canvas, left, right, top + sp(32), bottom)
+            state.connection != ConnectionState.CONNECTED || !state.microphoneGranted || state.setupRequired ->
+                drawConnectionState(canvas, left, right, top + sp(42), bottom)
             else -> drawTask(canvas, left, right, top + sp(42), bottom)
         }
     }
 
+    override fun performClick(): Boolean {
+        super.performClick()
+        controller?.onSingleTap()
+        if (state.pttMode == PttMode.TOGGLE || state.imageVisible || state.completionAwaitingReport) {
+            performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
+        }
+        return true
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
         gestures.onTouchEvent(event)
         when (event.actionMasked) {
@@ -110,7 +152,10 @@ class CommanderHudView @JvmOverloads constructor(
                 touchDownY = event.y
                 swiping = false
                 holdStarted = false
-                if (state.pttMode == PttMode.HOLD) handler.postDelayed(startHold, HOLD_DELAY_MS)
+                suppressTapConfirmation = false
+                if ((state.pttMode == PttMode.HOLD || state.completionAwaitingReport) && !state.imageVisible) {
+                    handler.postDelayed(startHold, HOLD_DELAY_MS)
+                }
             }
             MotionEvent.ACTION_MOVE -> {
                 if (abs(event.x - touchDownX) > TOUCH_SLOP || abs(event.y - touchDownY) > TOUCH_SLOP) {
@@ -129,40 +174,96 @@ class CommanderHudView @JvmOverloads constructor(
         return true
     }
 
+    override fun performLongClick(): Boolean {
+        super.performLongClick()
+        return true
+    }
+
     override fun onDetachedFromWindow() {
         handler.removeCallbacks(startHold)
         super.onDetachedFromWindow()
     }
 
     private fun drawStatus(canvas: Canvas, left: Float, right: Float, top: Float) {
-        val (label, color) = when (state.connection) {
-            ConnectionState.UNCONFIGURED -> "未配置" to COLOR_WARNING
-            ConnectionState.CONNECTING -> "连接中" to COLOR_MUTED
-            ConnectionState.CONNECTED -> "已连接" to COLOR_SUCCESS
-            ConnectionState.DISCONNECTED -> "已断开" to COLOR_MUTED
-            ConnectionState.ERROR -> "连接异常" to COLOR_DANGER
+        val color = when (state.connection) {
+            ConnectionState.UNCONFIGURED -> COLOR_WARNING
+            ConnectionState.CONNECTING -> COLOR_MUTED
+            ConnectionState.CONNECTED -> COLOR_SUCCESS
+            ConnectionState.DISCONNECTED -> COLOR_MUTED
+            ConnectionState.ERROR -> COLOR_DANGER
         }
         paint.color = color
         paint.textSize = sp(18)
         paint.isFakeBoldText = true
         canvas.drawCircle(left + sp(5), top + sp(8), sp(5), paint)
-        canvas.drawText(label, left + sp(18), top + sp(14), paint)
+        drawEllipsized(
+            canvas,
+            HudText.connectionLabel(state.connection),
+            left + sp(18),
+            top + sp(14),
+            (right - left) * 0.42f,
+        )
 
         paint.textAlign = Paint.Align.RIGHT
         paint.color = if (state.listening) COLOR_DANGER else COLOR_ACCENT
         val mode = when {
-            state.listening -> "正在听 · 松开提交"
-            state.playing -> "语音汇报中"
+            state.listening && state.pttMode == PttMode.HOLD -> "正在听 · 松开提交"
+            state.listening -> "正在听 · 轻触提交"
+            state.playing -> "正在播报 · 按住可打断"
             state.pttMode == PttMode.HOLD -> "按住说话"
-            else -> "单击开关麦克风"
+            else -> "轻触说话"
         }
-        canvas.drawText(mode, right, top + sp(14), paint)
+        canvas.drawText(ellipsize(mode, (right - left) * 0.52f), right, top + sp(14), paint)
         paint.textAlign = Paint.Align.LEFT
         paint.isFakeBoldText = false
     }
 
+    private fun drawConnectionState(canvas: Canvas, left: Float, right: Float, top: Float, bottom: Float) {
+        val title: String
+        val message: String
+        val hint: String
+        when {
+            !state.microphoneGranted && state.connection == ConnectionState.CONNECTED -> {
+                title = "需要麦克风权限"
+                message = "只有你主动按住或轻触开始时才会录音。请在系统设置中允许 Codex Commander 使用麦克风。"
+                hint = "权限开启前不会录音"
+            }
+            state.setupRequired || state.connection == ConnectionState.UNCONFIGURED -> {
+                title = "先连接 Mac 上的 Codex"
+                message = state.error ?: "填写 Tailscale 私网地址和 Mac 显示的一次性配对码。"
+                hint = "按返回键或菜单键打开连接设置"
+            }
+            state.connection == ConnectionState.CONNECTING -> {
+                title = "正在连接 Mac"
+                message = "连接成功后，就可以按住眼镜腿说出任务。"
+                hint = "请稍候"
+            }
+            else -> {
+                title = "与 Mac 的连接中断"
+                message = state.error ?: "请确认 Mac 没有休眠，Bridge 与 Tailscale 正在运行。"
+                hint = state.reconnectDelaySeconds?.let { "约 $it 秒后自动重试 · 返回键可检查设置" }
+                    ?: "正在自动恢复 · 返回键可检查设置"
+            }
+        }
+
+        paint.color = if (state.connection == ConnectionState.ERROR || state.setupRequired) COLOR_WARNING else COLOR_WHITE
+        paint.textSize = sp(25)
+        paint.isFakeBoldText = true
+        drawEllipsized(canvas, title, left, top, right - left)
+        paint.isFakeBoldText = false
+
+        paint.color = COLOR_WHITE
+        paint.textSize = sp(20)
+        drawWrapped(canvas, HudText.plain(message), left, top + sp(48), right - left, sp(29), maxLines = 5)
+
+        paint.textSize = sp(18)
+        paint.color = COLOR_MUTED
+        drawEllipsized(canvas, hint, left, bottom, right - left)
+    }
+
     private fun drawTask(canvas: Canvas, left: Float, right: Float, top: Float, bottom: Float) {
-        val title = state.selectedThread?.title ?: "CodeX Commander"
+        val title = state.selectedThread?.title?.let(HudText::plain)?.ifBlank { null }
+            ?: if (state.threads.isEmpty()) "眼镜遥控 · 新任务" else "Codex Commander"
         paint.color = COLOR_WHITE
         paint.textSize = sp(25)
         paint.isFakeBoldText = true
@@ -171,22 +272,31 @@ class CommanderHudView @JvmOverloads constructor(
         paint.isFakeBoldText = false
         paint.color = phaseColor(state.taskPhase)
         paint.textSize = sp(18)
-        canvas.drawText(phaseLabel(state.taskPhase), left, top + sp(34), paint)
+        val selectedIndex = state.threads.indexOfFirst { it.id == state.selectedThreadId }
+        val phase = if (state.threads.size > 1 && selectedIndex >= 0) {
+            "任务 ${selectedIndex + 1}/${state.threads.size} · ${HudText.phaseLabel(state.taskPhase)}"
+        } else {
+            HudText.phaseLabel(state.taskPhase)
+        }
+        drawEllipsized(canvas, phase, left, top + sp(34), right - left)
 
         paint.color = COLOR_WHITE
         paint.textSize = sp(20)
         val messageTop = top + sp(70)
-        drawWrapped(canvas, state.taskMessage, left, messageTop, right - left, sp(28), maxLines = 6)
+        drawWrapped(canvas, HudText.plain(state.taskMessage), left, messageTop, right - left, sp(28), maxLines = 6)
 
         val hint = when {
-            state.completionAwaitingReport -> "轻触播放汇报"
-            state.threads.size > 1 -> "左右滑动切换任务"
             state.error != null -> state.error!!
-            else -> "非按住状态不会启用麦克风"
+            state.completionAwaitingReport -> "轻触播放汇报 · 按住可继续说话"
+            state.playing -> "正在播报 · 按住可打断并说话"
+            state.activeTurnId != null -> "按住可补充指令 · 完成后才能切换任务"
+            state.threads.size > 1 -> "左右滑动切换任务 · 按住说话"
+            state.pttMode == PttMode.TOGGLE -> "轻触开始说话 · 再次轻触提交"
+            else -> "按住说话 · 松开提交 · 空闲时麦克风关闭"
         }
-        paint.textSize = sp(17)
+        paint.textSize = sp(18)
         paint.color = if (state.error != null) COLOR_DANGER else COLOR_MUTED
-        drawEllipsized(canvas, hint, left, bottom, right - left)
+        drawEllipsized(canvas, HudText.plain(hint), left, bottom, right - left)
     }
 
     private fun drawApproval(canvas: Canvas, left: Float, right: Float, top: Float, bottom: Float) {
@@ -194,22 +304,22 @@ class CommanderHudView @JvmOverloads constructor(
         paint.color = COLOR_DANGER
         paint.textSize = sp(18)
         paint.isFakeBoldText = true
-        canvas.drawText("需要物理审批", left, top, paint)
+        canvas.drawText("需要你确认", left, top, paint)
 
         paint.color = COLOR_WHITE
         paint.textSize = sp(24)
-        drawEllipsized(canvas, approval.title, left, top + sp(36), right - left)
+        drawEllipsized(canvas, HudText.plain(approval.title), left, top + sp(36), right - left)
         paint.isFakeBoldText = false
         paint.textSize = sp(18)
         paint.color = COLOR_MUTED
-        drawWrapped(canvas, approval.detail, left, top + sp(70), right - left, sp(25), maxLines = 5)
+        drawWrapped(canvas, HudText.plain(approval.detail), left, top + sp(70), right - left, sp(25), maxLines = 5)
 
         val choiceColor = when (state.approvalChoice) {
             com.codexcommander.inmo.model.ApprovalChoice.ACCEPT -> COLOR_SUCCESS
             com.codexcommander.inmo.model.ApprovalChoice.DECLINE -> COLOR_DANGER
             com.codexcommander.inmo.model.ApprovalChoice.CANCEL -> COLOR_WARNING
         }
-        paint.alpha = if (state.approvalArmed) 150 else 255
+        paint.alpha = if (state.approvalSubmitted) 150 else 255
         paint.color = choiceColor
         paint.textSize = sp(23)
         paint.isFakeBoldText = true
@@ -218,8 +328,14 @@ class CommanderHudView @JvmOverloads constructor(
         paint.alpha = 255
         paint.isFakeBoldText = false
         paint.color = COLOR_WHITE
-        paint.textSize = sp(17)
-        canvas.drawText(if (state.approvalArmed) "决定已提交" else "滑动选择 · 双击确认 · 语音不可批准", left, bottom, paint)
+        paint.textSize = sp(18)
+        drawEllipsized(
+            canvas,
+            if (state.approvalSubmitted) "已提交，等待 Codex" else "左右滑动选择 · 双击确认 · 不能用语音批准",
+            left,
+            bottom,
+            right - left,
+        )
     }
 
     private fun drawImage(canvas: Canvas, left: Float, right: Float, top: Float, bottom: Float) {
@@ -231,13 +347,18 @@ class CommanderHudView @JvmOverloads constructor(
         paint.color = COLOR_WHITE
         paint.textSize = sp(20)
         paint.isFakeBoldText = true
-        drawEllipsized(canvas, image.title, left, top, right - left)
+        drawEllipsized(canvas, HudText.plain(image.title), left, top, right - left)
         paint.isFakeBoldText = false
 
         val imageTop = top + sp(22)
         val imageBottom = bottom - sp(30)
         val bitmap = state.imageBitmap
-        if (bitmap == null) {
+        val imageError = state.imageError
+        if (imageError != null) {
+            paint.color = COLOR_DANGER
+            paint.textSize = sp(18)
+            drawWrapped(canvas, imageError, left, imageTop + sp(34), right - left, sp(26), 3)
+        } else if (bitmap == null) {
             paint.color = COLOR_MUTED
             paint.textSize = sp(18)
             canvas.drawText("正在载入图片…", left, imageTop + sp(34), paint)
@@ -246,7 +367,7 @@ class CommanderHudView @JvmOverloads constructor(
         }
 
         paint.color = COLOR_MUTED
-        paint.textSize = sp(16)
+        paint.textSize = sp(18)
         val hint = if (state.images.size > 1) "${state.imageIndex + 1}/${state.images.size} · 左右滑动 · 轻触关闭" else "轻触关闭"
         canvas.drawText(hint, left, bottom, paint)
     }
@@ -282,7 +403,7 @@ class CommanderHudView @JvmOverloads constructor(
             var count = paint.breakText(text, offset, text.length, true, maxWidth, null)
             if (count <= 0) break
             if (offset + count < text.length && line == maxLines - 1) {
-                val clipped = text.substring(offset, offset + count).trimEnd() + "…"
+                val clipped = ellipsize(text.substring(offset).trim(), maxWidth)
                 canvas.drawText(clipped, x, y + line * lineHeight, paint)
                 return
             }
@@ -296,24 +417,14 @@ class CommanderHudView @JvmOverloads constructor(
     }
 
     private fun drawEllipsized(canvas: Canvas, value: String, x: Float, y: Float, maxWidth: Float) {
-        if (paint.measureText(value) <= maxWidth) {
-            canvas.drawText(value, x, y, paint)
-            return
-        }
-        var count = paint.breakText(value, true, maxWidth - paint.measureText("…"), null)
-        count = count.coerceAtLeast(1)
-        canvas.drawText(value.take(count).trimEnd() + "…", x, y, paint)
+        canvas.drawText(ellipsize(value, maxWidth), x, y, paint)
     }
 
-    private fun phaseLabel(phase: String): String = when (phase) {
-        "queued" -> "已排队"
-        "working" -> "Codex 执行中"
-        "progress" -> "Codex 正在工作"
-        "waiting_approval" -> "等待审批"
-        "completed" -> "已完成"
-        "interrupted" -> "已中断"
-        "failed" -> "执行失败"
-        else -> "待命"
+    private fun ellipsize(value: String, maxWidth: Float): String {
+        if (value.isEmpty() || paint.measureText(value) <= maxWidth) return value
+        val available = (maxWidth - paint.measureText("…")).coerceAtLeast(1f)
+        val count = paint.breakText(value, true, available, null).coerceAtLeast(1)
+        return value.take(count).trimEnd() + "…"
     }
 
     private fun phaseColor(phase: String): Int = when (phase) {
@@ -325,10 +436,10 @@ class CommanderHudView @JvmOverloads constructor(
 
     private fun accessibilityDescription(value: HudState): String = buildString {
         append("Codex Commander。")
-        append(value.connection.name)
+        append(HudText.connectionLabel(value.connection))
         append('。')
         value.pendingApproval?.let { append("需要审批：${it.title}。当前选择${value.approvalChoice.label}。") }
-            ?: append(value.taskMessage)
+            ?: append(HudText.plain(value.error ?: value.taskMessage))
     }
 
     private fun sp(value: Int): Float = android.util.TypedValue.applyDimension(

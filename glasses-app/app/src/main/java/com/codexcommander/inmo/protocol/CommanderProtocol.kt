@@ -12,13 +12,13 @@ const val AUDIO_SAMPLE_RATE = 24_000
 const val AUDIO_CHANNELS = 1
 const val CLIENT_AUDIO_FRAME: Byte = 0x01
 const val SERVER_AUDIO_FRAME: Byte = 0x02
+private const val MAX_AUDIO_FRAME_BYTES = 64 * 1024
 
 @Serializable
 data class ThreadSummary(
     val id: String,
     val title: String,
     val preview: String = "",
-    val cwd: String? = null,
     val status: String,
     val updatedAt: Long? = null,
 )
@@ -75,7 +75,11 @@ sealed interface ServerMessage {
     data class AudioStart(override val eventId: Long) : ServerMessage
     data class AudioEnd(override val eventId: Long, val transcript: String?) : ServerMessage
     data class ApprovalRequested(override val eventId: Long, val approval: ApprovalCard) : ServerMessage
-    data class ApprovalResolved(override val eventId: Long, val approvalRequestId: String) : ServerMessage
+    data class ApprovalResolved(
+        override val eventId: Long,
+        val approvalRequestId: String,
+        val resolution: String,
+    ) : ServerMessage
     data class ImageReady(override val eventId: Long, val image: ImageCard) : ServerMessage
     data class Error(
         override val eventId: Long,
@@ -162,7 +166,7 @@ object CommanderProtocol {
                 ServerMessage.ApprovalRequested(it.eventId, it.approval)
             }
             "approval_resolved" -> json.decodeFromString<ApprovalResolvedWire>(text).let {
-                ServerMessage.ApprovalResolved(it.eventId, it.approvalRequestId)
+                ServerMessage.ApprovalResolved(it.eventId, it.approvalRequestId, it.resolution)
             }
             "image_card" -> json.decodeFromString<ImageReadyWire>(text).let {
                 ServerMessage.ImageReady(it.eventId, it.image)
@@ -181,9 +185,13 @@ object CommanderProtocol {
     }
 
     fun decodeAudioFrame(frame: ByteArray): ByteArray {
-        require(frame.size > 1 && frame[0] == SERVER_AUDIO_FRAME) { "Invalid server audio frame" }
+        require(frame.size in 2..MAX_AUDIO_FRAME_BYTES + 1 && frame[0] == SERVER_AUDIO_FRAME) {
+            "Invalid server audio frame"
+        }
         return frame.copyOfRange(1, frame.size)
     }
+
+    internal fun maxAudioFrameBytesForTest(): Int = MAX_AUDIO_FRAME_BYTES
 
     private fun eventId(text: String): Long = json.parseToJsonElement(text)
         .jsonObject["eventId"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L
@@ -273,7 +281,11 @@ private data class AudioEndWire(val eventId: Long, val transcript: String? = nul
 private data class ApprovalRequestWire(val eventId: Long, val approval: ApprovalCard)
 
 @Serializable
-private data class ApprovalResolvedWire(val eventId: Long, val approvalRequestId: String)
+private data class ApprovalResolvedWire(
+    val eventId: Long,
+    val approvalRequestId: String,
+    val resolution: String,
+)
 
 @Serializable
 private data class ImageReadyWire(val eventId: Long, val image: ImageCard)

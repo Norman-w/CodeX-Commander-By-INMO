@@ -9,6 +9,7 @@
     "dev": "tsx watch src/index.ts",
     "generate:codex": "node scripts/generate-codex-types.mjs",
     "start": "node dist/index.js",
+    "smoke:codex": "node scripts/smoke-codex.mjs",
     "test": "vitest run",
     "typecheck": "pnpm generate:codex && tsc -p tsconfig.json --noEmit"
   },
@@ -27,4 +28,3 @@
     "vitest": "^3.2.4"
   }
 }
-

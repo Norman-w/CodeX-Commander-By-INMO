@@ -46,6 +46,11 @@ android {
     testOptions {
         unitTests.isReturnDefaultValues = true
     }
+    lint {
+        // AIR3 runs Android 14; API 34 is the intentional hardware compatibility contract.
+        disable += "OldTargetApi"
+        abortOnError = true
+    }
 }
 
 dependencies {

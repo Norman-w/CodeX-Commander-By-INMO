@@ -10,6 +10,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
+import okhttp3.ResponseBody
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString
@@ -77,8 +78,7 @@ class BridgeClient(
             val body = response.body ?: throw IOException("图片响应为空")
             val declared = body.contentLength()
             if (declared > MAX_IMAGE_BYTES) throw IOException("图片超过眼镜端大小限制")
-            val bytes = body.bytes()
-            if (bytes.size > MAX_IMAGE_BYTES) throw IOException("图片超过眼镜端大小限制")
+            val bytes = readBounded(body, MAX_IMAGE_BYTES)
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: throw IOException("无法解码 WebP 图片")
         }
     }
@@ -127,5 +127,13 @@ class BridgeClient(
 
     private companion object {
         const val MAX_IMAGE_BYTES = 5 * 1024 * 1024
+
+        fun readBounded(body: ResponseBody, limit: Int): ByteArray {
+            body.source().use { source ->
+                val bytes = source.readByteArray((limit + 1).toLong())
+                if (bytes.size > limit) throw IOException("图片超过眼镜端大小限制")
+                return bytes
+            }
+        }
     }
 }

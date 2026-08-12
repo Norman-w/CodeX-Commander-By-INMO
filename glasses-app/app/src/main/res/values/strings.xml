@@ -1,9 +1,13 @@
 <resources>
     <string name="app_name">Codex Commander</string>
-    <string name="setup_title">连接 Mac Bridge</string>
-    <string name="bridge_url_hint">wss://Mac-Tailscale-名称/v1/visor（仅 WSS）</string>
-    <string name="pairing_code_hint">6 位配对码（已配对可留空）</string>
-    <string name="toggle_mode">单击开始 / 再次单击结束</string>
+    <string name="setup_title">连接 Mac 上的 Codex</string>
+    <string name="bridge_url_label">Tailscale 私网地址</string>
+    <string name="bridge_url_hint">wss://你的-Mac-私网地址/v1/visor</string>
+    <string name="pairing_code_label">一次性配对码</string>
+    <string name="pairing_code_hint">Mac 显示的 6 位数字</string>
+    <string name="toggle_mode">眼镜腿只支持单击时，使用“轻触开始 / 再次轻触提交”</string>
     <string name="save">保存并连接</string>
     <string name="cancel">取消</string>
+    <string name="open_settings">打开系统设置</string>
+    <string name="not_now">暂不</string>
 </resources>

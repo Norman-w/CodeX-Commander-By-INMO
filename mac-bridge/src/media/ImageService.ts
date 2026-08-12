@@ -6,6 +6,7 @@ import sharp from "sharp";
 
 import type { ImageCard } from "@codex-commander/protocol";
 
+import { redactSecrets } from "../privacy/VisorText.js";
 import { PathGuard } from "../security/PathGuard.js";
 
 export class ImageService {
@@ -33,11 +34,16 @@ export class ImageService {
 
     return {
       id,
-      title: (title || basename(source)).slice(0, 160),
+      title: safeImageTitle(title || basename(source)),
       url: `/media/${id}.webp`,
       width: result.width,
       height: result.height,
       mimeType: "image/webp"
     };
   }
+}
+
+function safeImageTitle(value: string): string {
+  const basenameOnly = value.includes("/") || value.includes("\\") ? basename(value) : value;
+  return redactSecrets(basenameOnly).slice(0, 160);
 }

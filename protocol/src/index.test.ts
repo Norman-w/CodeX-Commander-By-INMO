@@ -57,4 +57,18 @@ describe("visor.v1 protocol", () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it("supports a physical card for additional permission requests", async () => {
+    const { ApprovalCardSchema } = await import("./index.js");
+    const card = ApprovalCardSchema.parse({
+      requestId: "approval-1",
+      kind: "permissions",
+      title: "确认额外权限",
+      detail: "网络访问",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      expiresAt: Date.now() + 60_000
+    });
+    expect(card.kind).toBe("permissions");
+  });
 });

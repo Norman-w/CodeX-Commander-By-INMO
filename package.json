@@ -11,6 +11,8 @@
     "typecheck": "pnpm --filter @codex-commander/protocol build && pnpm --filter @codex-commander/mac-bridge typecheck",
     "android:assemble": "./scripts/with-local-env.sh ./glasses-app/gradlew -p ./glasses-app assembleDebug",
     "android:test": "./scripts/with-local-env.sh ./glasses-app/gradlew -p ./glasses-app testDebugUnitTest",
+    "doctor": "./scripts/doctor.sh",
+    "smoke:codex": "pnpm build && pnpm --filter @codex-commander/mac-bridge smoke:codex",
     "verify": "pnpm typecheck && pnpm test && pnpm build"
   }
 }

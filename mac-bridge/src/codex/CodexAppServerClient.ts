@@ -35,7 +35,7 @@ export class CodexAppServerClient extends EventEmitter {
     this.stopping = false;
     const child = spawn(this.codexBin, [...this.appServerArgs], {
       stdio: ["pipe", "pipe", "pipe"],
-      env: process.env
+      env: sanitizedChildEnvironment(process.env)
     });
     this.process = child;
 
@@ -158,4 +158,18 @@ export class CodexAppServerClient extends EventEmitter {
     }
     this.pending.clear();
   }
+}
+
+function sanitizedChildEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const result = { ...env };
+  for (const name of [
+    "OPENAI_API_KEY",
+    "COMMANDER_PAIRING_FILE",
+    "COMMANDER_ORIGIN_ALLOWLIST",
+    "COMMANDER_TAILSCALE_BIN"
+  ]) delete result[name];
+  for (const name of Object.keys(result)) {
+    if (name.startsWith("COMMANDER_") && name !== "COMMANDER_CWD") delete result[name];
+  }
+  return result;
 }

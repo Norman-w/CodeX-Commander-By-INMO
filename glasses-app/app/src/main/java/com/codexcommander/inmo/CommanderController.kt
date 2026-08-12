@@ -1,6 +1,8 @@
 package com.codexcommander.inmo
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.media.AudioManager
 import android.media.ToneGenerator
 import android.os.Handler
@@ -19,6 +21,7 @@ import com.codexcommander.inmo.protocol.ImageCard
 import com.codexcommander.inmo.protocol.ServerMessage
 import com.codexcommander.inmo.security.SecureTokenStore
 import com.codexcommander.inmo.storage.CommanderPreferences
+import com.codexcommander.inmo.ui.HudText
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -29,6 +32,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.security.MessageDigest
 
 class CommanderController(context: Context) : BridgeClient.Listener {
     private val applicationContext = context.applicationContext
@@ -45,6 +49,9 @@ class CommanderController(context: Context) : BridgeClient.Listener {
         HudState(
             connection = if (preferences.endpoint.isBlank()) ConnectionState.UNCONFIGURED else ConnectionState.DISCONNECTED,
             pttMode = preferences.pttMode,
+            microphoneGranted = applicationContext.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED,
+            setupRequired = preferences.endpoint.isBlank(),
+            taskMessage = if (preferences.endpoint.isBlank()) "填写 Mac 连接地址和配对码后即可开始" else "按住眼镜腿说出任务",
             lastEventId = preferences.lastEventId,
         ),
     )
@@ -55,11 +62,15 @@ class CommanderController(context: Context) : BridgeClient.Listener {
     private var imageJob: Job? = null
     private var reconnectAttempt = 0
     private var authenticationBlocked = false
+    private var pendingReport: Pair<String, String>? = null
 
     fun start() {
         started = true
+        setMicrophonePermission(
+            applicationContext.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED,
+        )
         if (preferences.endpoint.isBlank()) {
-            update { it.copy(connection = ConnectionState.UNCONFIGURED) }
+            update { it.copy(connection = ConnectionState.UNCONFIGURED, setupRequired = true) }
             return
         }
         connect()
@@ -69,6 +80,8 @@ class CommanderController(context: Context) : BridgeClient.Listener {
         started = false
         reconnectJob?.cancel()
         reconnectJob = null
+        if (pendingReport != null) update { it.copy(completionAwaitingReport = true) }
+        pendingReport = null
         ptt.forceStop()
         recorder.stop()
         player.stop()
@@ -79,9 +92,11 @@ class CommanderController(context: Context) : BridgeClient.Listener {
                 playing = false,
                 connection = ConnectionState.DISCONNECTED,
                 pendingApproval = null,
-                approvalArmed = false,
+                approvalSubmitted = false,
                 imageVisible = false,
                 imageBitmap = null,
+                imageError = null,
+                reconnectDelaySeconds = null,
             )
         }
     }
@@ -100,8 +115,25 @@ class CommanderController(context: Context) : BridgeClient.Listener {
         if (endpointChanged || !pairingCode.isNullOrBlank()) tokenStore.clear()
         ptt.mode = mode
         authenticationBlocked = false
-        update { it.copy(pttMode = mode, connection = ConnectionState.DISCONNECTED, error = null) }
+        update {
+            it.copy(
+                pttMode = mode,
+                connection = ConnectionState.DISCONNECTED,
+                setupRequired = false,
+                reconnectDelaySeconds = null,
+                error = null,
+            )
+        }
         if (started) connect()
+    }
+
+    fun setMicrophonePermission(granted: Boolean) {
+        update {
+            it.copy(
+                microphoneGranted = granted,
+                error = if (granted && it.error?.contains("麦克风权限") == true) null else it.error,
+            )
+        }
     }
 
     fun onPttDown(): PttAction = ptt.onDown().also(::applyPttAction)
@@ -111,21 +143,23 @@ class CommanderController(context: Context) : BridgeClient.Listener {
         val current = mutableState.value
         when {
             current.pendingApproval != null -> Unit
-            current.imageVisible -> update { it.copy(imageVisible = false, imageBitmap = null) }
+            current.imageVisible -> update { it.copy(imageVisible = false, imageBitmap = null, imageError = null) }
             current.completionAwaitingReport -> requestReport()
+            current.pttMode == com.codexcommander.inmo.model.PttMode.TOGGLE && current.listening -> onPttUp()
             current.pttMode == com.codexcommander.inmo.model.PttMode.TOGGLE -> onPttDown()
         }
     }
 
-    fun onDoubleTap() {
+    fun onDoubleTap(expectedApprovalRequestId: String? = null) {
         val current = mutableState.value
         val approval = current.pendingApproval
         if (approval != null) {
-            if (current.approvalArmed) return
+            if (expectedApprovalRequestId != null && approval.requestId != expectedApprovalRequestId) return
+            if (current.approvalSubmitted) return
             val sent = bridge.sendControl(CommanderProtocol.approval(approval.requestId, current.approvalChoice.wireValue))
             update {
-                if (sent) it.copy(approvalArmed = true, taskMessage = "已提交${current.approvalChoice.label}决定")
-                else it.copy(error = "审批发送失败，Bridge 已断开")
+                if (sent) it.copy(approvalSubmitted = true, taskMessage = "已提交：${current.approvalChoice.label}")
+                else it.copy(error = "审批未送达，请等待连接恢复后重试")
             }
             return
         }
@@ -135,22 +169,32 @@ class CommanderController(context: Context) : BridgeClient.Listener {
     fun onHorizontalSwipe(direction: Int) {
         val current = mutableState.value
         if (current.pendingApproval != null) {
+            if (current.approvalSubmitted) return
             val choice = approvalSelector.move(direction)
-            update { it.copy(approvalChoice = choice, approvalArmed = false) }
+            update { it.copy(approvalChoice = choice) }
             return
         }
-        if (current.imageVisible && current.images.size > 1) {
-            val next = (current.imageIndex + if (direction > 0) 1 else -1).mod(current.images.size)
-            update { it.copy(imageIndex = next, imageBitmap = null) }
-            loadImage(current.images[next])
+        if (current.imageVisible) {
+            if (current.images.size > 1) {
+                val next = (current.imageIndex + if (direction > 0) 1 else -1).mod(current.images.size)
+                update { it.copy(imageIndex = next, imageBitmap = null, imageError = null) }
+                loadImage(current.images[next])
+            }
             return
         }
-        if (current.threads.isNotEmpty()) {
+        if (current.activeTurnId != null && current.threads.size > 1) {
+            update { it.copy(error = "Codex 正在执行，完成或中断后才能切换任务") }
+            return
+        }
+        if (current.threads.size > 1) {
             val selected = current.threads.indexOfFirst { it.id == current.selectedThreadId }.coerceAtLeast(0)
             val next = (selected + if (direction > 0) 1 else -1).mod(current.threads.size)
             val thread = current.threads[next]
-            bridge.sendControl(CommanderProtocol.selectTask(thread.id))
-            update { it.copy(selectedThreadId = thread.id, taskMessage = "已选择：${thread.title}") }
+            if (bridge.sendControl(CommanderProtocol.selectTask(thread.id))) {
+                update { it.copy(selectedThreadId = thread.id, taskMessage = "已切换到：${thread.title}", error = null) }
+            } else {
+                update { it.copy(error = "任务未切换，请等待连接恢复") }
+            }
         }
     }
 
@@ -163,7 +207,7 @@ class CommanderController(context: Context) : BridgeClient.Listener {
     }
 
     override fun onConnecting() = runOnMain {
-        update { it.copy(connection = ConnectionState.CONNECTING, error = null) }
+        update { it.copy(connection = ConnectionState.CONNECTING, reconnectDelaySeconds = null, error = null) }
     }
 
     override fun onOpen() = runOnMain {
@@ -171,7 +215,14 @@ class CommanderController(context: Context) : BridgeClient.Listener {
         val token = tokenStore.read()
         val pairingCode = if (token == null) preferences.pairingCode else null
         if (token == null && pairingCode == null) {
-            update { it.copy(connection = ConnectionState.ERROR, error = "缺少设备令牌，请输入 Mac 显示的配对码") }
+            authenticationBlocked = true
+            update {
+                it.copy(
+                    connection = ConnectionState.ERROR,
+                    setupRequired = true,
+                    error = "请输入 Mac 显示的六位配对码",
+                )
+            }
             bridge.disconnect()
             return@runOnMain
         }
@@ -194,14 +245,24 @@ class CommanderController(context: Context) : BridgeClient.Listener {
                     tokenStore.save(it)
                     preferences.clearPairingCode()
                 }
-                update { it.copy(connection = ConnectionState.CONNECTED, error = null, lastEventId = message.eventId) }
+                update {
+                    it.copy(
+                        connection = ConnectionState.CONNECTED,
+                        setupRequired = false,
+                        reconnectDelaySeconds = null,
+                        error = null,
+                        lastEventId = message.eventId,
+                    )
+                }
             }
             is ServerMessage.StateSync -> {
-                val hadSummary = mutableState.value.latestSummary
+                val current = mutableState.value
+                val unreportedSummary = message.latestSummary?.takeIf { summary ->
+                    message.activeTurnId == null &&
+                        summaryFingerprint(summary) != preferences.reportedSummaryFingerprint(message.selectedThreadId)
+                }
+                val shouldNotify = unreportedSummary != null && unreportedSummary != current.latestSummary
                 update {
-                    val newSummary = message.latestSummary?.takeIf { summary ->
-                        message.activeTurnId == null && summary != it.latestSummary
-                    }
                     val phase = when {
                         message.pendingApproval != null -> "waiting_approval"
                         message.activeTurnId != null -> "working"
@@ -219,15 +280,22 @@ class CommanderController(context: Context) : BridgeClient.Listener {
                         taskPhase = phase,
                         taskMessage = when {
                             message.pendingApproval != null -> message.pendingApproval.detail
-                            message.activeTurnId != null -> "Codex 正在执行，已同步最新状态"
-                            newSummary != null -> newSummary
-                            else -> it.taskMessage
+                            message.activeTurnId != null -> "Codex 正在处理任务"
+                            unreportedSummary != null -> unreportedSummary
+                            message.selectedThreadId != null -> message.threads
+                                .firstOrNull { thread -> thread.id == message.selectedThreadId }
+                                ?.preview
+                                ?.takeIf(String::isNotBlank)
+                                ?: it.taskMessage
+                            else -> "尚无眼镜任务，按住说出第一条开发指令"
                         },
-                        completionAwaitingReport = newSummary != null,
+                        completionAwaitingReport = unreportedSummary != null,
+                        reconnectDelaySeconds = null,
+                        error = null,
                         lastEventId = message.eventId,
                     )
                 }
-                if (message.activeTurnId == null && message.latestSummary != null && message.latestSummary != hadSummary) playCompletionTone()
+                if (shouldNotify) playCompletionTone()
                 if (message.pendingApproval != null) resetApproval()
             }
             is ServerMessage.TaskEvent -> {
@@ -251,13 +319,29 @@ class CommanderController(context: Context) : BridgeClient.Listener {
                 ptt.forceStop()
                 runCatching { player.start() }
                     .onSuccess { update { it.copy(listening = false, playing = true) } }
-                    .onFailure { error -> update { it.copy(playing = false, error = error.message ?: "音频播放失败") } }
+                    .onFailure { error ->
+                        val reportFailed = pendingReport != null
+                        pendingReport = null
+                        update {
+                            it.copy(
+                                playing = false,
+                                completionAwaitingReport = reportFailed || it.completionAwaitingReport,
+                                error = error.message ?: "音频播放失败",
+                            )
+                        }
+                    }
             }
             is ServerMessage.AudioEnd -> {
                 player.stop()
+                val completedReport = pendingReport
+                pendingReport = null
+                if (completedReport != null) {
+                    preferences.saveReportedSummaryFingerprint(completedReport.first, completedReport.second)
+                }
                 update {
                     it.copy(
                         playing = false,
+                        completionAwaitingReport = if (completedReport != null) false else it.completionAwaitingReport,
                         taskMessage = message.transcript?.takeIf(String::isNotBlank) ?: it.taskMessage,
                     )
                 }
@@ -268,11 +352,25 @@ class CommanderController(context: Context) : BridgeClient.Listener {
             }
             is ServerMessage.ApprovalResolved -> {
                 resetApproval()
-                update { it.copy(pendingApproval = null, approvalArmed = false, taskMessage = "审批已处理") }
+                update {
+                    it.copy(
+                        pendingApproval = null,
+                        approvalSubmitted = false,
+                        taskMessage = HudText.approvalResolution(message.resolution),
+                    )
+                }
             }
             is ServerMessage.ImageReady -> {
                 val images = listOf(message.image) + mutableState.value.images.filterNot { it.id == message.image.id }
-                update { it.copy(images = images.take(20), imageIndex = 0, imageVisible = true, imageBitmap = null) }
+                update {
+                    it.copy(
+                        images = images.take(20),
+                        imageIndex = 0,
+                        imageVisible = true,
+                        imageBitmap = null,
+                        imageError = null,
+                    )
+                }
                 loadImage(message.image)
             }
             is ServerMessage.Error -> {
@@ -280,11 +378,16 @@ class CommanderController(context: Context) : BridgeClient.Listener {
                     tokenStore.clear()
                     authenticationBlocked = true
                 }
+                val friendly = HudText.friendlyError(message.code, message.message)
+                val reportFailed = pendingReport != null
+                pendingReport = null
                 update {
                     it.copy(
                         connection = if (message.recoverable) it.connection else ConnectionState.ERROR,
+                        setupRequired = message.code == "authentication_failed" || it.setupRequired,
                         listening = false,
-                        error = message.message,
+                        completionAwaitingReport = reportFailed || it.completionAwaitingReport,
+                        error = friendly,
                     )
                 }
                 recorder.stop()
@@ -299,16 +402,20 @@ class CommanderController(context: Context) : BridgeClient.Listener {
     }
 
     override fun onClosed(reason: String) = runOnMain {
+        val reportFailed = pendingReport != null
+        pendingReport = null
         update {
             it.copy(
                 connection = ConnectionState.DISCONNECTED,
                 listening = false,
                 playing = false,
+                completionAwaitingReport = reportFailed || it.completionAwaitingReport,
                 pendingApproval = null,
-                approvalArmed = false,
+                approvalSubmitted = false,
                 imageVisible = false,
                 imageBitmap = null,
-                error = reason,
+                imageError = null,
+                error = HudText.friendlyError(null, reason),
             )
         }
         recorder.stop()
@@ -318,16 +425,20 @@ class CommanderController(context: Context) : BridgeClient.Listener {
     }
 
     override fun onFailure(message: String) = runOnMain {
+        val reportFailed = pendingReport != null
+        pendingReport = null
         update {
             it.copy(
                 connection = ConnectionState.ERROR,
                 listening = false,
                 playing = false,
+                completionAwaitingReport = reportFailed || it.completionAwaitingReport,
                 pendingApproval = null,
-                approvalArmed = false,
+                approvalSubmitted = false,
                 imageVisible = false,
                 imageBitmap = null,
-                error = message,
+                imageError = null,
+                error = HudText.friendlyError(null, message),
             )
         }
         recorder.stop()
@@ -341,7 +452,13 @@ class CommanderController(context: Context) : BridgeClient.Listener {
         reconnectJob = null
         runCatching { bridge.connect(preferences.endpoint) }
             .onFailure { error ->
-                update { it.copy(connection = ConnectionState.ERROR, error = error.message ?: "Bridge 地址无效") }
+                update {
+                    it.copy(
+                        connection = ConnectionState.ERROR,
+                        setupRequired = true,
+                        error = HudText.friendlyError(null, error.message ?: "连接地址无效"),
+                    )
+                }
             }
     }
 
@@ -349,6 +466,7 @@ class CommanderController(context: Context) : BridgeClient.Listener {
         if (!started || authenticationBlocked || reconnectJob?.isActive == true) return
         val delayMs = (1_000L shl reconnectAttempt.coerceAtMost(5)).coerceAtMost(30_000L)
         reconnectAttempt++
+        update { it.copy(reconnectDelaySeconds = (delayMs / 1_000L).toInt().coerceAtLeast(1)) }
         reconnectJob = scope.launch {
             delay(delayMs)
             if (started) connect()
@@ -365,22 +483,35 @@ class CommanderController(context: Context) : BridgeClient.Listener {
 
     private fun startPtt() {
         val current = mutableState.value
-        if (current.connection != ConnectionState.CONNECTED || current.pendingApproval != null) {
+        if (current.pendingApproval != null) {
             ptt.forceStop()
-            update { it.copy(error = if (current.pendingApproval != null) "请先物理处理审批卡" else "Bridge 尚未连接") }
+            update { it.copy(error = "请先在眼镜上处理审批") }
+            return
+        }
+        if (!current.microphoneGranted) {
+            ptt.forceStop()
+            update { it.copy(error = "麦克风权限未开启，请在系统设置中允许录音") }
+            return
+        }
+        if (current.connection != ConnectionState.CONNECTED) {
+            ptt.forceStop()
+            update { it.copy(error = "Mac 连接尚未就绪，请稍后再试") }
             return
         }
         player.stop()
-        if (current.playing) update { it.copy(playing = false) }
+        if (current.playing) {
+            markPendingReportHandled()
+            update { it.copy(playing = false) }
+        }
         try {
-            if (!bridge.sendControl(CommanderProtocol.pttStart())) throw IllegalStateException("Bridge 连接已断开")
+            if (!bridge.sendControl(CommanderProtocol.pttStart())) throw IllegalStateException("Mac 连接已断开")
             recorder.start { pcm -> bridge.sendAudio(pcm) }
             update { it.copy(listening = true, playing = false, completionAwaitingReport = false, error = null) }
         } catch (error: Throwable) {
             recorder.stop()
             bridge.sendControl(CommanderProtocol.pttEnd())
             ptt.forceStop()
-            update { it.copy(listening = false, error = error.message ?: "无法启动麦克风") }
+            update { it.copy(listening = false, error = HudText.friendlyError(null, error.message ?: "无法启动麦克风")) }
         }
     }
 
@@ -390,32 +521,45 @@ class CommanderController(context: Context) : BridgeClient.Listener {
         val sent = bridge.sendControl(CommanderProtocol.pttEnd())
         ptt.forceStop()
         update {
-            if (sent) it.copy(listening = false, taskMessage = "正在理解并交给 Codex…")
-            else it.copy(listening = false, error = "语音提交失败，Bridge 已断开")
+            if (sent) it.copy(listening = false, taskPhase = "queued", taskMessage = "正在处理语音…", error = null)
+            else it.copy(listening = false, error = "语音未送达，请等待连接恢复后重试")
         }
     }
 
     private fun requestReport() {
-        bridge.sendControl(CommanderProtocol.reportRequest(mutableState.value.selectedThreadId))
-        update { it.copy(completionAwaitingReport = false, taskMessage = "正在准备语音汇报…") }
+        val current = mutableState.value
+        val sent = bridge.sendControl(CommanderProtocol.reportRequest(current.selectedThreadId))
+        if (sent) current.latestSummary?.let { summary ->
+            current.selectedThreadId?.let { threadId ->
+                pendingReport = threadId to summaryFingerprint(summary)
+            }
+        }
+        update {
+            if (sent) it.copy(completionAwaitingReport = false, taskMessage = "正在准备语音汇报…", error = null)
+            else it.copy(error = "汇报请求未送达，请等待连接恢复后重试")
+        }
     }
 
     private fun resetApproval() {
         approvalSelector.reset()
-        update { it.copy(approvalChoice = ApprovalChoice.DECLINE, approvalArmed = false) }
+        update { it.copy(approvalChoice = ApprovalChoice.DECLINE, approvalSubmitted = false) }
     }
 
     private fun loadImage(image: ImageCard) {
-        val token = tokenStore.read() ?: return
+        val token = tokenStore.read()
+        if (token == null) {
+            update { it.copy(imageError = "图片认证已失效，请重新配对") }
+            return
+        }
         imageJob?.cancel()
         imageJob = scope.launch {
             runCatching { bridge.downloadImage(image.url, preferences.deviceId, token) }
                 .onSuccess { bitmap ->
                     if (mutableState.value.images.getOrNull(mutableState.value.imageIndex)?.id == image.id) {
-                        update { it.copy(imageBitmap = bitmap, imageVisible = true, error = null) }
+                        update { it.copy(imageBitmap = bitmap, imageVisible = true, imageError = null) }
                     }
                 }
-                .onFailure { error -> update { it.copy(error = error.message ?: "图片加载失败") } }
+                .onFailure { update { it.copy(imageError = "图片加载失败，请在 Mac 上检查 Bridge 日志") } }
         }
     }
 
@@ -433,5 +577,17 @@ class CommanderController(context: Context) : BridgeClient.Listener {
 
     private inline fun runOnMain(crossinline block: () -> Unit) {
         if (Looper.myLooper() == Looper.getMainLooper()) block() else handler.post { block() }
+    }
+
+    private fun summaryFingerprint(value: String): String = MessageDigest.getInstance("SHA-256")
+        .digest(value.toByteArray(Charsets.UTF_8))
+        .take(12)
+        .joinToString("") { byte -> "%02x".format(byte) }
+
+    private fun markPendingReportHandled() {
+        pendingReport?.let { (threadId, fingerprint) ->
+            preferences.saveReportedSummaryFingerprint(threadId, fingerprint)
+        }
+        pendingReport = null
     }
 }

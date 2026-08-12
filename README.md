@@ -4,6 +4,33 @@
 
 > 当前状态：可构建的开源 MVP。Mac/协议自动测试和 Android 单元测试已完成；AIR3 的真实触控事件、8 小时功耗和切网恢复必须拿到实机后按文档验收，未通过前不应称为日常可用版。
 
+## 到货后一键安装
+
+Mac 首次只需准备一次 `.env`，填入 `OPENAI_API_KEY`、要让 Codex 操作的 `COMMANDER_CWD`，以及当前 Codex 可执行文件路径。`.env` 永远不会提交：
+
+```bash
+cp .env.sample .env
+./scripts/doctor.sh
+```
+
+AIR3 到货后，在 Mac 与眼镜都登录同一个 Tailscale、打开 AIR3 USB 调试并授权，然后运行：
+
+```bash
+./scripts/one-click-install.sh
+```
+
+脚本会按锁文件安装依赖、运行全部自动测试、构建 APK、把 Bridge 安装成 Mac 登录服务、配置 tailnet 私有 WSS、安装眼镜应用，并通过已授权的 USB 调试连接写入短时配对配置。最后它会等到 AIR3 真实连上 Bridge 才报告完成；正常路径不需要在眼镜里手输长地址或配对码。自动配置入口只存在于本地 debug APK，并受 Android 的 shell 调试权限保护，release APK 不包含它。脚本不会自动安装 Tailscale、不会登录账户，也不会覆盖已有的 Tailscale Serve 配置；这些需要用户明确完成一次。
+
+默认 `COMMANDER_AUTO_SELECT_LATEST=true`：Bridge 重启后会续接 `COMMANDER_CWD` 中最近的 Commander 专用任务；全新安装还没有这类任务时，第一次语音指令才会创建。设为 `false` 可要求每次无绑定启动都等待新指令。普通桌面任务永远不会被自动选择或被第二个 App Server 抢占；Bridge 也不操纵 Codex 桌面输入框。
+
+若要继承此刻打开的 Codex 任务上下文，在该任务的终端中提前运行一次（任务 ID 只写入本机 `.env`，不会显示或提交）：
+
+```bash
+./scripts/bind-current-codex.sh
+```
+
+Bridge 会从该任务创建一个持久的“眼镜遥控”分支并继承截至启动时的上下文；之后由 Bridge 独占分支写入，桌面原任务可继续使用，不会触发 App Server 的 active-writer 冲突。Bridge 重启会复用该分支；再次主动运行绑定脚本会生成新的本地 binding ID，从最新上下文创建新分支。上下文来源优先于“最近任务”自动选择。Bridge 的真实 App Server 冒烟会在安装前验证分支可创建。
+
 ## 隐私与本地配置
 
 仓库不包含 API Key、配对令牌、设备 ID、Tailscale 主机名、个人目录、Android SDK/JDK 路径或签名密钥。所有用户/设备相关配置都放在本地 `.env`、Android 应用私有存储或被忽略的运行时目录中。
@@ -14,7 +41,7 @@ cp .env.sample .env
 
 - `.env` 只在本机使用，已被 Git 忽略；不要把真实值贴进 Issue、日志或截图。
 - `.env.sample` 只包含占位符和安全默认值，可以提交。
-- Android 的 WSS 地址、设备 ID 和配对信息在应用运行时录入；令牌由 Android Keystore 保护，不写入 APK 源码。
+- Android 的 WSS 地址、设备 ID 和配对信息由本机安装脚本通过 ADB 注入，或在应用里手动录入；令牌由 Android Keystore 保护，不写入 APK 源码。
 - 发布签名请使用本机 `keystore.properties`/`signing.properties` 和 keystore；这些文件均被忽略。
 - 提交前可运行 `./scripts/public-audit.sh`，检查实际将被 Git 跟踪的内容。
 
@@ -55,6 +82,9 @@ cp .env.sample .env
 OPENAI_API_KEY=your_openai_api_key
 COMMANDER_CWD=/absolute/path/to/the/project/codex/should/control
 COMMANDER_CODEX_BIN=/absolute/path/to/codex
+COMMANDER_THREAD_ID=
+COMMANDER_CONTEXT_BINDING_ID=
+COMMANDER_AUTO_SELECT_LATEST=true
 ```
 
 默认安全配置是 `approvalPolicy=on-request`、`sandbox=workspace-write`、沙箱内网络关闭；需要 Codex 命令直接联网时再显式设置 `COMMANDER_NETWORK_ACCESS=true`。Bridge 仅监听 `127.0.0.1:8787`，不把 App Server 暴露到网络。Bridge 进程会把当前工作目录与一次性配对码写到本机终端，请勿公开分享启动日志。
@@ -68,12 +98,14 @@ pnpm --filter @codex-commander/mac-bridge start
 
 前台启动时可先用 `pgrep -f 'mac-bridge/dist/index.js'` 确认 PID，再执行 `kill -HUP <bridge-pid>`。不要对未核对的进程发信号。
 
+若不再需要开机登录服务，可运行 `./scripts/uninstall-mac-bridge-service.sh`；它只移除 LaunchAgent，保留本机 `.env`、配对状态与日志，避免误删个人配置。
+
 ## 2. Tailscale 私网 WSS
 
 Mac 与 AIR3 加入同一个 tailnet，启用 MagicDNS/HTTPS，然后把本机端口反向代理到 tailnet 内的 HTTPS：
 
 ```bash
-tailscale serve --bg 8787
+tailscale serve --bg --yes 8787
 tailscale serve status
 ```
 
@@ -87,7 +119,7 @@ wss://<tailscale-https-host>/v1/visor
 
 ## 3. 构建与安装 AIR3 APK
 
-要求 Android SDK 34 和 JDK 17。可以在当前 shell 导出工具路径，也可以仅把它们写入不会提交的 `.env`：
+要求 Android SDK 34 和 JDK 17 或更新兼容版本（项目源与字节码目标固定为 Java 17）。可以在当前 shell 导出工具路径，也可以仅把它们写入不会提交的 `.env`：
 
 ```bash
 ANDROID_HOME=/absolute/path/to/Android/sdk
@@ -103,16 +135,17 @@ AIR3 开启开发者模式和 USB 调试、授权后：
 ./scripts/install-air3.sh
 ```
 
-首次启动输入 WSS 地址和六位配对码。应用只接受 `wss://`；debug/release APK 都禁止明文传输。设备令牌随后使用 Android Keystore 的 AES-GCM 密钥加密；一次性配对码会从眼镜偏好中删除。
+单独运行该脚本只负责安装并打开应用，因此首次启动仍可手动输入 WSS 地址和六位配对码；完整的 `one-click-install.sh` 会自动写入并验证连接。应用只接受 `wss://`；debug/release APK 都禁止明文传输。设备令牌随后使用 Android Keystore 的 AES-GCM 密钥加密；一次性配对码会从眼镜偏好中删除。
 
 ## 4. 眼镜交互
 
 - 默认：眼镜腿按下/持续触摸开始录音，松开立即 stop/release 并提交。
-- 实机若没有可靠的 `ACTION_UP`：返回键打开设置，启用“单击开始 / 再次单击结束”。
+- 实机若没有可靠的 `ACTION_UP`：返回键打开设置，启用“轻触开始 / 再次轻触提交”。
 - 非 PTT 不创建 `AudioRecord`，不监听或分析环境声音。
-- 左右滑动：切换任务、图片，或选择审批决定。
-- 完成卡轻触：请求语音汇报；图片轻触关闭。
+- 左右滑动：空闲时切换任务；图片中翻页；审批卡上选择决定。Codex 执行期间不会误切任务。
+- 完成卡轻触：请求语音汇报；继续按住仍可追加指令；图片轻触关闭。
 - 审批默认“拒绝”；滑动选择，双击才确认。语音管家没有审批工具。
+- 命令、文件修改和额外权限请求都必须使用实体审批卡；额外权限即使允许也只授予当前 Codex turn。
 - 应用进入后台：立即停止录音/播放、断开网络，不保持进程常驻。重新打开后同步遗漏事件。
 
 ## 5. 验证
@@ -134,7 +167,8 @@ pnpm android:assemble
 
 ## 已知边界
 
-- v1 管理本 Bridge 创建/选择的 Codex 任务，不操纵 Codex 桌面 App 当前输入框。
+- v1 通过 App Server 管理同一 Codex 任务记录，但不操纵 Codex 桌面 App 当前输入框。
+- 默认由第一次眼镜指令创建 Commander 专用任务；可选开启最近 Commander 任务续接。若绑定了当前桌面任务，则创建继承上下文的专用分支。正在由其他客户端执行或等待审批的任务不会被 Bridge 自动接管。
 - Mac 必须保持开机，Codex 和 OpenAI 登录必须有效。
 - 深度待机下没有常驻服务，完成通知是尽力送达；重新打开强制同步。
 - INMO AIR3 当前公开 SDK 主要是 Unity 包，内部依赖 `UnityPlayer`。本项目不把它塞入原生 APK；实际按键码用标准 Android 事件探针确认，必要时只为已证实的原生 AAR 接口增加薄适配层。详情见兼容文档。

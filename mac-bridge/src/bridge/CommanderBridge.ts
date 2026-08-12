@@ -9,7 +9,7 @@ import type { BridgeConfig } from "../config.js";
 import { CodexController } from "../codex/CodexController.js";
 import type { Logger } from "../log.js";
 import { ImageService } from "../media/ImageService.js";
-import { RealtimeVoiceClient } from "../realtime/RealtimeVoiceClient.js";
+import { RealtimeVoiceClient, VoiceClientError } from "../realtime/RealtimeVoiceClient.js";
 import { createVoiceToolRouter } from "../realtime/VoiceToolRouter.js";
 import { PairingStore, type PairingSnapshot } from "../security/PairingStore.js";
 import { EventJournal, RequestDeduplicator } from "./EventJournal.js";
@@ -88,12 +88,15 @@ export class CommanderBridge {
         this.broadcast(this.journal.create({ type: "assistant_audio_end" }, false));
       }
       this.audioResponseActive = false;
-      this.broadcastError("realtime_error", error.message, true);
+      this.broadcastError(error instanceof VoiceClientError ? error.code : "realtime_error", error.message, true);
     });
   }
 
   async start(): Promise<PairingSnapshot> {
     const pairing = await this.pairing.initialize();
+    if (!this.voice.isConfigured()) {
+      throw new Error("OPENAI_API_KEY 未配置；请在 Mac 的 .env 中填写后再启动 Bridge");
+    }
     await this.codex.start();
     this.ready = true;
     return pairing;
@@ -159,13 +162,19 @@ export class CommanderBridge {
         } catch (error) {
           session.pttActive = false;
           this.voice.abortInput();
+          if (error instanceof VoiceClientError) throw new BridgeError(error.code, error.message, true);
           throw error;
         }
         break;
       case "ptt_end":
-        if (!session.pttActive) throw new BridgeError("ptt_not_active", "当前没有正在录音的 PTT", true);
+        if (!session.pttActive) break;
         session.pttActive = false;
-        await this.voice.endInput();
+        try {
+          await this.voice.endInput();
+        } catch (error) {
+          if (error instanceof VoiceClientError) throw new BridgeError(error.code, error.message, true);
+          throw error;
+        }
         break;
       case "task_select":
         await this.codex.selectThread(message.threadId);
@@ -200,6 +209,9 @@ export class CommanderBridge {
     if (!session?.authenticated || !session.pttActive) return;
     const decoded = decodeBinaryFrame(frame);
     if (decoded.kind !== CLIENT_AUDIO_FRAME) throw new BridgeError("bad_audio_frame", "未知的音频帧类型", true);
+    if (decoded.payload.byteLength > MAX_AUDIO_FRAME_BYTES) {
+      throw new BridgeError("bad_audio_frame", "音频帧超过允许大小", true);
+    }
     this.voice.appendInput(decoded.payload);
   }
 
@@ -208,7 +220,9 @@ export class CommanderBridge {
     if (!session) return;
     const bridgeError = error instanceof BridgeError
       ? error
-      : new BridgeError("internal_error", error instanceof Error ? error.message : String(error), true);
+      : error instanceof VoiceClientError
+        ? new BridgeError(error.code, error.message, true)
+        : new BridgeError("internal_error", error instanceof Error ? error.message : String(error), true);
     session.transport.sendControl(this.journal.create({
       type: "error",
       code: bridgeError.code,
@@ -245,6 +259,7 @@ export class CommanderBridge {
     }
     session.authenticated = true;
     session.deviceId = hello.deviceId;
+    this.logger.info("AIR3 authenticated", { pairing: deviceToken ? "new" : "saved_token" });
     session.transport.sendControl(this.journal.create({
       type: "hello_ack",
       requestId: hello.requestId,
@@ -298,3 +313,5 @@ export class BridgeError extends Error {
     super(message);
   }
 }
+
+const MAX_AUDIO_FRAME_BYTES = 64 * 1024;

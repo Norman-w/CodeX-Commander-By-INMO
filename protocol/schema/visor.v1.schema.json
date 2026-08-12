@@ -462,10 +462,6 @@
                     "maxLength": 1000,
                     "default": ""
                   },
-                  "cwd": {
-                    "type": "string",
-                    "maxLength": 2048
-                  },
                   "status": {
                     "type": "string",
                     "enum": [
@@ -504,7 +500,8 @@
                       "type": "string",
                       "enum": [
                         "command",
-                        "file_change"
+                        "file_change",
+                        "permissions"
                       ]
                     },
                     "title": {
@@ -793,7 +790,8 @@
                   "type": "string",
                   "enum": [
                     "command",
-                    "file_change"
+                    "file_change",
+                    "permissions"
                   ]
                 },
                 "title": {

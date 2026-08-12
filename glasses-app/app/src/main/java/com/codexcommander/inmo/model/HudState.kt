@@ -8,14 +8,17 @@ import com.codexcommander.inmo.protocol.ThreadSummary
 enum class ConnectionState { UNCONFIGURED, CONNECTING, CONNECTED, DISCONNECTED, ERROR }
 enum class PttMode { HOLD, TOGGLE }
 enum class ApprovalChoice(val wireValue: String, val label: String) {
-    DECLINE("decline", "拒绝"),
-    ACCEPT("accept", "允许"),
-    CANCEL("cancel", "取消"),
+    DECLINE("decline", "拒绝操作"),
+    ACCEPT("accept", "仅本次允许"),
+    CANCEL("cancel", "取消请求"),
 }
 
 data class HudState(
     val connection: ConnectionState = ConnectionState.UNCONFIGURED,
     val pttMode: PttMode = PttMode.HOLD,
+    val microphoneGranted: Boolean = false,
+    val setupRequired: Boolean = false,
+    val reconnectDelaySeconds: Int? = null,
     val listening: Boolean = false,
     val playing: Boolean = false,
     val selectedThreadId: String? = null,
@@ -27,11 +30,12 @@ data class HudState(
     val completionAwaitingReport: Boolean = false,
     val pendingApproval: ApprovalCard? = null,
     val approvalChoice: ApprovalChoice = ApprovalChoice.DECLINE,
-    val approvalArmed: Boolean = false,
+    val approvalSubmitted: Boolean = false,
     val images: List<ImageCard> = emptyList(),
     val imageIndex: Int = 0,
     val imageBitmap: Bitmap? = null,
     val imageVisible: Boolean = false,
+    val imageError: String? = null,
     val lastEventId: Long = 0,
     val error: String? = null,
 ) {
@@ -41,4 +45,3 @@ data class HudState(
     val requiresScreenOn: Boolean
         get() = listening || playing || pendingApproval != null || imageVisible
 }
-

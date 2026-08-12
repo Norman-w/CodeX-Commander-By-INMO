@@ -11,5 +11,6 @@ This page overrides the web-oriented master palette for the optical smart-glasse
 - Redraw only after state changes. Keep information inside the central safe area.
 - Priority order: approval > requested image > completed report card > task progress.
 - Every state must have a text label; color is never the only signal.
-- Approval defaults to decline and requires a physical double-confirm action.
-
+- Approval defaults to decline and requires a physical double-tap confirmation; after submission, all selection/confirmation gestures remain locked until resolution.
+- Task switching appears only when at least two tasks exist and always shows the current index.
+- Technical transport/API errors are converted to short, actionable Chinese; raw stack traces, Markdown and secret-bearing paths never appear in the HUD.

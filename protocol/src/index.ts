@@ -12,7 +12,6 @@ export const ThreadSummarySchema = z.object({
   id: IdSchema,
   title: z.string().min(1).max(240),
   preview: z.string().max(1_000).default(""),
-  cwd: z.string().max(2_048).optional(),
   status: z.enum(["idle", "working", "waiting_approval", "failed", "unknown"]),
   updatedAt: z.number().int().nonnegative().optional()
 });
@@ -21,7 +20,7 @@ export const ApprovalDecisionSchema = z.enum(["accept", "decline", "cancel"]);
 
 export const ApprovalCardSchema = z.object({
   requestId: IdSchema,
-  kind: z.enum(["command", "file_change"]),
+  kind: z.enum(["command", "file_change", "permissions"]),
   title: z.string().min(1).max(120),
   detail: z.string().min(1).max(4_000),
   threadId: IdSchema,

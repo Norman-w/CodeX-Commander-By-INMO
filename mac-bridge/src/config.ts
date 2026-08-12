@@ -18,6 +18,9 @@ const EnvSchema = z.object({
   COMMANDER_REALTIME_VOICE: z.string().min(1).default("marin"),
   COMMANDER_REALTIME_IDLE_MS: z.coerce.number().int().min(10_000).max(600_000).default(60_000),
   COMMANDER_CODEX_BIN: z.string().min(1).default("codex"),
+  COMMANDER_THREAD_ID: z.string().uuid().or(z.literal("")).default(""),
+  COMMANDER_CONTEXT_BINDING_ID: z.string().uuid().or(z.literal("")).default(""),
+  COMMANDER_AUTO_SELECT_LATEST: z.enum(["true", "false"]).default("true"),
   COMMANDER_CODEX_MODEL: z.string().default(""),
   COMMANDER_APPROVAL_POLICY: z.enum(["untrusted", "on-request", "never"]).default("on-request"),
   COMMANDER_SANDBOX: z.enum(["read-only", "workspace-write", "danger-full-access"]).default("workspace-write"),
@@ -45,13 +48,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     originAllowlist: new Set(parsed.COMMANDER_ORIGIN_ALLOWLIST.split(",").map((entry) => entry.trim()).filter(Boolean)),
     pairingFile: resolve(parsed.COMMANDER_PAIRING_FILE),
     realtime: {
-      apiKey: parsed.OPENAI_API_KEY,
+      apiKey: usableApiKey(parsed.OPENAI_API_KEY),
       model: parsed.COMMANDER_REALTIME_MODEL,
       voice: parsed.COMMANDER_REALTIME_VOICE,
       idleMs: parsed.COMMANDER_REALTIME_IDLE_MS
     },
     codex: {
       bin: parsed.COMMANDER_CODEX_BIN,
+      threadId: parsed.COMMANDER_THREAD_ID || undefined,
+      contextBindingId: parsed.COMMANDER_CONTEXT_BINDING_ID || undefined,
+      autoSelectLatest: parsed.COMMANDER_AUTO_SELECT_LATEST === "true",
       model: parsed.COMMANDER_CODEX_MODEL || undefined,
       approvalPolicy: parsed.COMMANDER_APPROVAL_POLICY,
       sandbox: parsed.COMMANDER_SANDBOX,
@@ -60,4 +66,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     mediaRoots: [realpathSync(cwd), ...explicitRoots.filter(existsSync).map((entry) => realpathSync(entry))],
     logLevel: parsed.COMMANDER_LOG_LEVEL
   } as const;
+}
+
+function usableApiKey(value: string | undefined): string | undefined {
+  const normalized = value?.trim();
+  if (!normalized || normalized === "your_openai_api_key" || normalized === "sk-your-key-here") return undefined;
+  return normalized;
 }

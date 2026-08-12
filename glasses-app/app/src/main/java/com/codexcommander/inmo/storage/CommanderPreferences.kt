@@ -15,6 +15,8 @@ class CommanderPreferences(context: Context) {
     val endpoint: String get() = preferences.getString(KEY_ENDPOINT, "") ?: ""
     val pairingCode: String? get() = preferences.getString(KEY_PAIRING_CODE, null)?.takeIf(String::isNotBlank)
     val lastEventId: Long get() = preferences.getLong(KEY_LAST_EVENT_ID, 0L)
+    fun reportedSummaryFingerprint(threadId: String?): String? = threadId
+        ?.let { preferences.getString("${KEY_REPORTED_SUMMARY}_$it", null) }
     val pttMode: PttMode
         get() = runCatching { PttMode.valueOf(preferences.getString(KEY_PTT_MODE, PttMode.HOLD.name)!!) }
             .getOrDefault(PttMode.HOLD)
@@ -41,11 +43,16 @@ class CommanderPreferences(context: Context) {
         if (value > lastEventId) preferences.edit().putLong(KEY_LAST_EVENT_ID, value).apply()
     }
 
+    fun saveReportedSummaryFingerprint(threadId: String?, value: String) {
+        if (threadId != null) preferences.edit().putString("${KEY_REPORTED_SUMMARY}_$threadId", value).apply()
+    }
+
     private companion object {
         const val KEY_DEVICE_ID = "device_id"
         const val KEY_ENDPOINT = "endpoint"
         const val KEY_PAIRING_CODE = "pairing_code"
         const val KEY_LAST_EVENT_ID = "last_event_id"
+        const val KEY_REPORTED_SUMMARY = "reported_summary"
         const val KEY_PTT_MODE = "ptt_mode"
     }
 }
