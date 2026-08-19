@@ -11,6 +11,9 @@ const EnvSchema = z.object({
   OPENAI_API_KEY: z.string().min(1).optional(),
   COMMANDER_HOST: z.string().min(1).default("127.0.0.1"),
   COMMANDER_PORT: z.coerce.number().int().min(1).max(65_535).default(8787),
+  COMMANDER_VOICE: z.enum(["auto", "codex", "codex-realtime", "openai", "turn"]).default("codex-realtime"),
+  COMMANDER_APP_SERVER_MODE: z.enum(["gui_shared", "stdio"]).default("gui_shared"),
+  COMMANDER_APP_SERVER_SOCKET: z.string().default(""),
   COMMANDER_CWD: z.string().min(1).default(repoRoot),
   COMMANDER_ORIGIN_ALLOWLIST: z.string().default(""),
   COMMANDER_PAIRING_FILE: z.string().min(1).default(resolve(packageRoot, "data/pairing.json")),
@@ -47,6 +50,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     cwd: realpathSync(cwd),
     originAllowlist: new Set(parsed.COMMANDER_ORIGIN_ALLOWLIST.split(",").map((entry) => entry.trim()).filter(Boolean)),
     pairingFile: resolve(parsed.COMMANDER_PAIRING_FILE),
+    voice: {
+      mode: parsed.COMMANDER_VOICE === "openai" ? "openai" as const : "codex-realtime" as const
+    },
+    appServer: {
+      mode: parsed.COMMANDER_APP_SERVER_MODE,
+      socketPath: parsed.COMMANDER_APP_SERVER_SOCKET || undefined
+    },
     realtime: {
       apiKey: usableApiKey(parsed.OPENAI_API_KEY),
       model: parsed.COMMANDER_REALTIME_MODEL,

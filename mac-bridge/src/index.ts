@@ -25,7 +25,8 @@ try {
     listen: `http://${config.host}:${config.port}`,
     websocket: `ws://${config.host}:${config.port}/v1/visor`,
     cwd: config.cwd,
-    realtimeConfigured: Boolean(config.realtime.apiKey),
+    voiceMode: config.voice.mode,
+    appServerMode: config.appServer.mode,
     pairingCode: pairing.pairedDeviceId ? "already paired" : pairing.code,
     pairingExpiresAt: pairing.expiresAt || undefined
   });

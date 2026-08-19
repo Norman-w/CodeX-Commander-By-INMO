@@ -19,7 +19,7 @@ Zod 是运行时验证的最终权威；生成的 Draft-07 JSON Schema 供跨语
 | `0x01` | AIR3 → Mac | 24,000 Hz、mono、signed PCM16 little-endian |
 | `0x02` | Mac → AIR3 | 相同格式 |
 
-没有 PTT 激活状态时，Bridge 丢弃客户端音频。AIR3 每 40 ms 发送一帧；首次 Realtime 建连最多缓存 5 秒音频，断线时清空而不提交。
+没有 PTT 激活状态时，Bridge 丢弃客户端音频。AIR3 每 40 ms 发送一帧；首次 Core realtime 建连最多缓存 5 秒音频，断线时清空而不提交。
 
 ## 恢复与去重
 
@@ -32,6 +32,7 @@ Zod 是运行时验证的最终权威；生成的 Draft-07 JSON Schema 供跨语
 
 - `approval_decision.physicalConfirmation` 必须为 JSON `true`。
 - 审批卡 `kind` 支持 `command`、`file_change` 与 `permissions`；额外权限批准只回传原请求的受限子集，Bridge 固定使用 turn 级作用域。
-- Realtime 的工具集合中没有审批操作。
+- 语音由 Codex app-server 的 `thread/realtime/*`（websocket transport）处理，保留 thread 上下文；不直连 OpenAI Realtime API。
+- Core realtime 会话中没有审批工具；审批仍走 visor 审批卡。
 - 图片 URL 只能是 `/media/<24位hex>.webp`，下载还需设备 token。
 - Zod 在 Mac 边界校验每个控制消息，Kotlin 忽略未来字段以便向前兼容。
