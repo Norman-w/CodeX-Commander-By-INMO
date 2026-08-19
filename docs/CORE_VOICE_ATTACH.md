@@ -59,13 +59,28 @@ node mac-bridge/scripts/probe-realtime-attach.mjs   # 附着 GUI app-server 冒�
 
 ## 冲突矩阵（预期与协调）
 
-| 场景 | 预期行为 | Bridge 策略 |
-|------|----------|-------------|
-| GUI Voice Chat 进行中，Bridge 对同 thread `realtime/start` | 可能拒绝或冲突 | **产品规则**：眼镜 PTT 前关闭 GUI Voice；HUD 提示 `realtime_unavailable` |
-| GUI Voice 已关闭 | Bridge `realtime/start` 应成功 | 正常 PTT 流式语音 |
-| Bridge session 收到 `thread/realtime/closed` | session 失效 | 下次 PTT 自动 `ensureSession()`；orchestrator 单次重试 |
+| 场景 | 实测 / 预期 | Bridge 策略 |
+|------|-------------|-------------|
+| GUI Voice Chat 进行中，Bridge 对同 thread `realtime/start` | ChatGPT GUI Voice 走 **独立 stdio app-server**（WebRTC），与 managed daemon **不是同一进程**。在 daemon 上对同 thread 第二次 websocket `realtime/start` **返回成功**，第一路未收到 `closed`。 | **产品规则仍建议**：眼镜 PTT 前关闭 GUI Voice；同时 `appendAudio` 视为未定义。HUD 仅在 `realtime/start` 真正失败时提示 `realtime_unavailable`。 |
+| GUI Voice 已关闭 | `probe-realtime-attach.mjs`：`ok: true`（静音 PCM 时 `sawAudio` 可为 false） | 正常 PTT 流式语音 |
+| Bridge session 收到 `thread/realtime/closed` | session 失效 | 下次 PTT 自动 `ensureSession()`；orchestrator 单次重试；`CommanderBridge.start()` 会先做一次轻量 `realtime/start` 探针 |
 | appendAudio 超时 | 临时失败 | stop + restart；仍失败则 `appendSpeech("继续")` |
 | GUI 与 Bridge 同时 appendAudio | 未文档化；视为未定义 | 单一 owner：同一时刻只允许一个 PTT 客户端 |
+| 绑定桌面任务后 `gui_shared` | `bind-current-codex.sh` 后 fork 标题为「眼镜遥控 · …」，preview / `latestSummary` 能引用桌面任务内容；对该 fork `realtime/start` 成功 | 眼镜专用 writer，避免与桌面争用 |
+
+## 实机附着笔记（2026-08-19）
+
+- ChatGPT.app 自己的 `codex app-server` 默认 `--listen stdio://`，**不会**露出 `~/.codex/app-server-control/app-server-control.sock`。
+- `codex app-server daemon start` 需要 managed standalone 路径 `~/.codex/packages/standalone/current/codex`。本机可将 ChatGPT 自带二进制链过去：
+  ```bash
+  mkdir -p ~/.codex/packages/standalone
+  ln -s /Applications/ChatGPT.app/Contents/Resources ~/.codex/packages/standalone/current
+  /Applications/ChatGPT.app/Contents/Resources/codex app-server daemon start
+  /Applications/ChatGPT.app/Contents/Resources/codex app-server daemon enable-remote-control
+  ```
+- control socket 是 **Unix WebSocket**（HTTP 101 升级后的 JSON-RPC）。官方 `codex app-server proxy --sock` 在本机 **不会**把 stdio NDJSON 转到该 socket（进程不连接 named socket，initialize 超时）。Bridge 的 `gui_shared` 改为直连 Unix WebSocket。
+- `initialize` 必须带 `capabilities.experimentalApi=true`，否则 `thread/realtime/start` 返回 `-32600`。
+- 从桌面任务 `thread/fork` 时写入 `realtime_conversation` config，否则 fork 出的 thread 会报 `does not support realtime conversation`；语音客户端仍会 `startVoiceThread()` 兜底。
 
 ## gui_shared 启用步骤
 
@@ -81,6 +96,10 @@ node mac-bridge/scripts/probe-realtime-attach.mjs   # 附着 GUI app-server 冒�
    COMMANDER_VOICE=codex-realtime
    COMMANDER_CODEX_BIN=/Applications/ChatGPT.app/Contents/Resources/codex
    ```
+
+Bridge 启动时会对当前 thread 做一次 `thread/realtime/start` 探针；失败则 Bridge 视为未就绪。
+
+字幕：Core `thread/realtime/transcript/*` 经 `caption` 事件推到眼镜 HUD（`你：` / `Codex：`），助手最终转写同时进入 `assistant_audio_end.transcript`。
 
 ## Fallback：stdio 独立 app-server
 
@@ -110,5 +129,6 @@ Bridge 会 fork 出 Commander 专用分支，避免与桌面 writer 冲突。
 ## 相关代码
 
 - [`mac-bridge/src/app-server/discover.ts`](../mac-bridge/src/app-server/discover.ts) — socket 探测与 launch 解析
+- [`mac-bridge/src/app-server/unixWsJsonRpc.ts`](../mac-bridge/src/app-server/unixWsJsonRpc.ts) — gui_shared Unix WebSocket JSON-RPC
 - [`mac-bridge/src/voice/CodexRealtimeVoiceClient.ts`](../mac-bridge/src/voice/CodexRealtimeVoiceClient.ts) — websocket PCM 双向
 - [`mac-bridge/src/voice/RealtimeSessionOrchestrator.ts`](../mac-bridge/src/voice/RealtimeSessionOrchestrator.ts) — closed/error 恢复

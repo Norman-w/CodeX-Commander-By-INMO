@@ -37,6 +37,15 @@ class CommanderProtocolTest {
         assertEquals("expired", parsed.resolution)
     }
 
+    @Test
+    fun parsesVoiceCaption() {
+        val parsed = CommanderProtocol.parseServer(
+            """{"type":"caption","protocol":"visor.v1","eventId":11,"sentAt":1,"role":"user","text":"给首页加暗色模式"}""",
+        ) as ServerMessage.Caption
+        assertEquals("user", parsed.role)
+        assertEquals("给首页加暗色模式", parsed.text)
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun rejectsOversizedServerAudioFrames() {
         val frame = ByteArray(CommanderProtocol.maxAudioFrameBytesForTest() + 2)

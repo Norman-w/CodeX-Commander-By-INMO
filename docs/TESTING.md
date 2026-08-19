@@ -20,7 +20,7 @@
 - [ ] 错码和过期码被拒绝；Mac `SIGHUP` 后旧 token 失效。
 - [ ] 按住说一个开发任务，松开后录音立即释放。
 - [ ] 按住说话，松开后通过 Core realtime 流式返回 Codex 语音（非 Mac 听写 turn）。
-- [ ] `probe-realtime-attach.mjs` 在 ChatGPT 运行时通过（gui_shared）。
+- [x] `probe-realtime-attach.mjs` 在 ChatGPT 运行且 daemon socket 可用时通过（gui_shared；2026-08-19 本机 `ok: true`）。
 - [ ] 眼镜显示 working/progress/completed；断网重连不重复提交命令。
 - [ ] 完成只提示音，不自动朗读；轻触后播放汇报。
 - [ ] Codex 返回图片时显示缩放 WebP，左右滑动切换。
@@ -43,4 +43,4 @@
 
 ## 当前未执行项
 
-没有接入本会话的 AIR3 实机，所以上述硬件、固件、网络、Perfetto 与 8 小时 A/B 项保持未勾选。自动化通过不代表实机功耗验收通过。
+没有接入本会话的 AIR3 实机（`adb devices` 为空），所以上述硬件、固件、网络、Perfetto 与 8 小时 A/B 项保持未勾选。Mac 侧 `probe-app-server-attach` / `probe-realtime-attach` 已在 ChatGPT + managed daemon 上通过。自动化通过不代表实机功耗验收通过。

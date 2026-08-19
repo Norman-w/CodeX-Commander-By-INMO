@@ -5,6 +5,10 @@ const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
 input.on("line", (line) => {
   const message = JSON.parse(line);
   if (message.method === "initialize") {
+    if (!message.params?.capabilities?.experimentalApi) {
+      send({ id: message.id, error: { code: -32600, message: "thread/realtime/start requires experimentalApi capability" } });
+      return;
+    }
     send({ id: message.id, result: { userAgent: "fake-codex" } });
     return;
   }

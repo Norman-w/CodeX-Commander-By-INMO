@@ -29,4 +29,10 @@ class HudTextTest {
         assertEquals("Mac 已连接", HudText.connectionLabel(ConnectionState.CONNECTED))
         assertEquals("需要处理", HudText.connectionLabel(ConnectionState.ERROR))
     }
+
+    @Test
+    fun prefixesVoiceCaptions() {
+        assertEquals("你：给首页加暗色模式", HudText.caption("user", "给首页加暗色模式"))
+        assertEquals("Codex：已经开始改。", HudText.caption("assistant", "已经开始改。"))
+    }
 }

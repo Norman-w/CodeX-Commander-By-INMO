@@ -158,6 +158,11 @@ export const ServerControlMessageSchema = z.discriminatedUnion("type", [
     transcript: z.string().max(16_000).optional()
   }),
   ServerEventBaseSchema.extend({
+    type: z.literal("caption"),
+    role: z.enum(["user", "assistant"]),
+    text: z.string().min(1).max(16_000)
+  }),
+  ServerEventBaseSchema.extend({
     type: z.literal("approval_request"),
     approval: ApprovalCardSchema
   }),

@@ -346,6 +346,14 @@ class CommanderController(context: Context) : BridgeClient.Listener {
                     )
                 }
             }
+            is ServerMessage.Caption -> {
+                update {
+                    it.copy(
+                        taskMessage = HudText.caption(message.role, message.text),
+                        lastEventId = message.eventId,
+                    )
+                }
+            }
             is ServerMessage.ApprovalRequested -> {
                 resetApproval()
                 update { it.copy(pendingApproval = message.approval, taskPhase = "waiting_approval") }

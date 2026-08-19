@@ -231,7 +231,8 @@ export class CodexController {
       approvalsReviewer: "user",
       sandbox: this.config.codex.sandbox,
       ephemeral: false,
-      threadSource: commanderThreadSource(this.config)
+      threadSource: commanderThreadSource(this.config),
+      config: realtimeSessionConfig()
     };
     const forked = await this.client.request<ThreadForkResponse>("thread/fork", params);
     this.selectedThreadId = forked.thread.id;

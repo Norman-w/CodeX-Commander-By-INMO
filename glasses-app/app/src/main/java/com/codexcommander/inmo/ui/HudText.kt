@@ -48,6 +48,12 @@ object HudText {
         else -> "审批已处理"
     }
 
+    fun caption(role: String, text: String): String {
+        val spoken = plain(text)
+        if (spoken.isEmpty()) return spoken
+        return if (role == "user") "你：$spoken" else "Codex：$spoken"
+    }
+
     fun friendlyError(code: String?, rawMessage: String): String {
         val raw = rawMessage.trim()
         val normalized = raw.lowercase()

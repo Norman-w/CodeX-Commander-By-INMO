@@ -56,6 +56,9 @@ describe("CodexRealtimeVoiceClient", () => {
       ["user", "给首页加暗色模式"],
       ["assistant", "已经开始改。"]
     ]);
+    const audioEnd = vi.fn();
+    client.on("audioEnd", audioEnd);
+    await vi.waitFor(() => expect(audioEnd).toHaveBeenCalledWith("已经开始改。"));
     client.close();
   });
 
@@ -80,6 +83,23 @@ describe("CodexRealtimeVoiceClient", () => {
     listeners[0]?.({ method: "thread/realtime/closed", params: { threadId: "thread-1" } });
     await client.endInput();
     expect(starts).toBeGreaterThanOrEqual(1);
+    client.close();
+  });
+
+  it("probes realtime/start on the selected thread", async () => {
+    const requests: Array<{ method: string }> = [];
+    const host: CodexRealtimeHost = {
+      ensureSelectedThread: async () => "thread-1",
+      startVoiceThread: async () => "thread-voice",
+      requestJsonRpc: async (method) => {
+        requests.push({ method });
+        return {} as never;
+      },
+      subscribeNotifications: () => () => undefined
+    };
+    const client = new CodexRealtimeVoiceClient(host, new Logger("error"));
+    await client.probeRealtime();
+    expect(requests.map((item) => item.method)).toContain("thread/realtime/start");
     client.close();
   });
 });

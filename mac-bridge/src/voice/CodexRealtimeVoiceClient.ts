@@ -66,6 +66,10 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
     return true;
   }
 
+  async probeRealtime(): Promise<void> {
+    await this.ensureSession();
+  }
+
   async beginInput(): Promise<void> {
     this.inputStarted = true;
     this.inputBytes = 0;
@@ -282,7 +286,7 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
     }
     if (!this.outputStarted) return;
     this.outputStarted = false;
-    this.emit("audioEnd", "");
+    this.emit("audioEnd", this.captions.complete("assistant"));
   }
 }
 //#endregion

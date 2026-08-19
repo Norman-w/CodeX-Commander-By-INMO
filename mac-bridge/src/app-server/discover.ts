@@ -91,6 +91,13 @@ export async function probeAppServerAttach(options: {
 
   const attachReady = controlSocketExists;
   const recommendedMode = attachReady ? "proxy" : "stdio";
+  if (controlSocketExists && !chatgptRunning) {
+    notes.push("control socket 来自 managed daemon，ChatGPT.app 未运行；thread 仍共享 ~/.codex");
+  }
+  if (!controlSocketExists) {
+    notes.push("GUI 的 app-server 默认走 stdio，不会自动露出 socket；需要 `codex app-server daemon start`");
+    notes.push("若 daemon start 报 standalone 缺失，可将 ChatGPT 自带二进制链到 ~/.codex/packages/standalone/current/codex");
+  }
 
   return {
     codexBin,

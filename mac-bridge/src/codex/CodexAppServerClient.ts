@@ -4,7 +4,15 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
 
 import type { AppServerLaunchConfig } from "../app-server/discover.js";
+import { UnixWsJsonRpc } from "../app-server/unixWsJsonRpc.js";
 import type { Logger } from "../log.js";
+//#endregion
+
+//#region 常量/配置
+const INITIALIZE_PARAMS = {
+  clientInfo: { name: "codex_commander_inmo", title: "CodeX Commander By INMO", version: "0.1.0" },
+  capabilities: { experimentalApi: true }
+} as const;
 //#endregion
 
 //#region 模型/类型
@@ -24,6 +32,7 @@ export type CodexServerRequest = { id: JsonRpcId; method: string; params?: JsonO
 //#region 公开 API
 export class CodexAppServerClient extends EventEmitter {
   private process?: ChildProcessWithoutNullStreams;
+  private unixWs?: UnixWsJsonRpc;
   private nextId = 1;
   private readonly pending = new Map<JsonRpcId, PendingRequest>();
   private stopping = false;
@@ -57,39 +66,23 @@ export class CodexAppServerClient extends EventEmitter {
   }
 
   async start(): Promise<void> {
-    if (this.process) return;
+    if (this.process || this.unixWs) return;
     this.stopping = false;
-    const child = spawn(this.launch.codexBin, [...this.launch.args], {
-      stdio: ["pipe", "pipe", "pipe"],
-      env: sanitizedChildEnvironment(process.env)
-    });
-    this.process = child;
-
-    child.stderr.setEncoding("utf8");
-    child.stderr.on("data", (chunk: string) => this.logger.debug("codex stderr", chunk.trim()));
-    child.once("error", (error) => this.failAll(error));
-    child.once("exit", (code, signal) => {
-      this.process = undefined;
-      const error = new Error(`Codex App Server exited (code=${String(code)}, signal=${String(signal)})`);
-      if (!this.stopping) this.logger.error(error.message);
-      this.failAll(error);
-      this.emit("exit", error);
-    });
-
-    const lines = createInterface({ input: child.stdout, crlfDelay: Infinity });
-    lines.on("line", (line) => this.handleLine(line));
-
-    await this.request("initialize", {
-      clientInfo: { name: "codex_commander_inmo", title: "CodeX Commander By INMO", version: "0.1.0" },
-      capabilities: null
-    });
+    if (this.launch.mode === "proxy") await this.startUnixWs(this.launch.socketPath);
+    else await this.startStdioProcess();
+    await this.request("initialize", INITIALIZE_PARAMS);
     this.notify("initialized", {});
   }
 
   async stop(): Promise<void> {
+    this.stopping = true;
+    const unixWs = this.unixWs;
+    if (unixWs) {
+      this.unixWs = undefined;
+      unixWs.close();
+    }
     const child = this.process;
     if (!child) return;
-    this.stopping = true;
     child.stdin.end();
     await new Promise<void>((resolve) => {
       const timer = setTimeout(() => {
@@ -105,7 +98,7 @@ export class CodexAppServerClient extends EventEmitter {
   }
 
   async request<T = unknown>(method: string, params?: JsonObject, timeoutMs = 30_000): Promise<T> {
-    if (!this.process?.stdin.writable) throw new Error("Codex App Server is not running");
+    if (!this.isTransportOpen()) throw new Error("Codex App Server is not running");
     const id = this.nextId++;
     const request = params === undefined ? { method, id } : { method, id, params };
 
@@ -139,8 +132,56 @@ export class CodexAppServerClient extends EventEmitter {
   }
 
   private write(message: unknown): void {
+    if (this.unixWs) {
+      this.unixWs.send(message);
+      return;
+    }
     if (!this.process?.stdin.writable) throw new Error("Codex App Server is not running");
     this.process.stdin.write(`${JSON.stringify(message)}\n`);
+  }
+
+  private isTransportOpen(): boolean {
+    return Boolean(this.unixWs?.isOpen() || this.process?.stdin.writable);
+  }
+
+  private async startUnixWs(socketPath: string): Promise<void> {
+    const unixWs = new UnixWsJsonRpc(socketPath);
+    unixWs.on("message", (message) => this.handleMessage(message as JsonObject));
+    unixWs.on("nonjson", (line: string) => this.logger.warn("Ignoring non-JSON Codex output", line));
+    unixWs.on("close", () => {
+      this.unixWs = undefined;
+      const error = new Error("Codex App Server control socket closed");
+      if (!this.stopping) this.logger.error(error.message);
+      this.failAll(error);
+      this.emit("exit", error);
+    });
+    unixWs.on("error", (error: Error) => {
+      if (!this.stopping) this.logger.warn("Codex control socket error", error.message);
+    });
+    await unixWs.connect();
+    this.unixWs = unixWs;
+  }
+
+  private async startStdioProcess(): Promise<void> {
+    const child = spawn(this.launch.codexBin, [...this.launch.args], {
+      stdio: ["pipe", "pipe", "pipe"],
+      env: sanitizedChildEnvironment(process.env)
+    });
+    this.process = child;
+
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => this.logger.debug("codex stderr", chunk.trim()));
+    child.once("error", (error) => this.failAll(error));
+    child.once("exit", (code, signal) => {
+      this.process = undefined;
+      const error = new Error(`Codex App Server exited (code=${String(code)}, signal=${String(signal)})`);
+      if (!this.stopping) this.logger.error(error.message);
+      this.failAll(error);
+      this.emit("exit", error);
+    });
+
+    const lines = createInterface({ input: child.stdout, crlfDelay: Infinity });
+    lines.on("line", (line) => this.handleLine(line));
   }
 
   private handleLine(line: string): void {
@@ -152,7 +193,10 @@ export class CodexAppServerClient extends EventEmitter {
       this.logger.warn("Ignoring non-JSON Codex output", line);
       return;
     }
+    this.handleMessage(message);
+  }
 
+  private handleMessage(message: JsonObject): void {
     if (message.id !== undefined && ("result" in message || "error" in message)) {
       const id = message.id as JsonRpcId;
       const pending = this.pending.get(id);

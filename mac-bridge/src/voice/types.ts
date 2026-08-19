@@ -5,6 +5,7 @@ import { AUDIO_SAMPLE_RATE } from "@codex-commander/protocol";
 //#region 模型/类型
 export type CommanderVoice = {
   isConfigured(): boolean;
+  probeRealtime(): Promise<void>;
   beginInput(): Promise<void>;
   appendInput(pcm16le: Uint8Array): void;
   endInput(): Promise<void>;

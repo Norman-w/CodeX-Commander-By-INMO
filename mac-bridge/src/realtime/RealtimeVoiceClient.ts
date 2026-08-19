@@ -46,6 +46,11 @@ export class RealtimeVoiceClient extends EventEmitter {
 
   isConfigured(): boolean { return Boolean(this.config.apiKey); }
 
+  async probeRealtime(): Promise<void> {
+    if (!this.config.apiKey) throw new VoiceClientError("realtime_not_configured", "Mac 尚未配置 OpenAI API Key");
+    await this.ensureConnected();
+  }
+
   async beginInput(): Promise<void> {
     if (!this.config.apiKey) throw new VoiceClientError("realtime_not_configured", "Mac 尚未配置 OpenAI API Key");
     this.inputStarted = true;

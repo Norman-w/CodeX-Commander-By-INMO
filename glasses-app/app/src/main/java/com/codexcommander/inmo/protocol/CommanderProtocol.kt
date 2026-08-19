@@ -74,6 +74,7 @@ sealed interface ServerMessage {
 
     data class AudioStart(override val eventId: Long) : ServerMessage
     data class AudioEnd(override val eventId: Long, val transcript: String?) : ServerMessage
+    data class Caption(override val eventId: Long, val role: String, val text: String) : ServerMessage
     data class ApprovalRequested(override val eventId: Long, val approval: ApprovalCard) : ServerMessage
     data class ApprovalResolved(
         override val eventId: Long,
@@ -161,6 +162,9 @@ object CommanderProtocol {
             "assistant_audio_start" -> ServerMessage.AudioStart(eventId(text))
             "assistant_audio_end" -> json.decodeFromString<AudioEndWire>(text).let {
                 ServerMessage.AudioEnd(it.eventId, it.transcript)
+            }
+            "caption" -> json.decodeFromString<CaptionWire>(text).let {
+                ServerMessage.Caption(it.eventId, it.role, it.text)
             }
             "approval_request" -> json.decodeFromString<ApprovalRequestWire>(text).let {
                 ServerMessage.ApprovalRequested(it.eventId, it.approval)
@@ -276,6 +280,9 @@ private data class TaskEventWire(
 
 @Serializable
 private data class AudioEndWire(val eventId: Long, val transcript: String? = null)
+
+@Serializable
+private data class CaptionWire(val eventId: Long, val role: String, val text: String)
 
 @Serializable
 private data class ApprovalRequestWire(val eventId: Long, val approval: ApprovalCard)

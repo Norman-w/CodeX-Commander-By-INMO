@@ -27,6 +27,7 @@ Zod 是运行时验证的最终权威；生成的 Draft-07 JSON Schema 供跨语
 - 服务端事件有单调 `eventId`；眼镜持久化最后一个编号。
 - 重连 `hello.lastEventId` 后回放可恢复事件，再发送完整 `state_sync`。
 - 音频开始/结束是瞬时事件，不进入恢复日志；任务、审批和图片进入有界日志。
+- `caption` 是瞬时字幕事件（`role=user|assistant`），把 Core realtime 转写推到眼镜 HUD；同样不进入恢复日志。
 
 ## 安全不变量
 

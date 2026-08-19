@@ -776,6 +776,48 @@
             },
             "type": {
               "type": "string",
+              "const": "caption"
+            },
+            "role": {
+              "type": "string",
+              "enum": [
+                "user",
+                "assistant"
+              ]
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16000
+            }
+          },
+          "required": [
+            "protocol",
+            "eventId",
+            "sentAt",
+            "type",
+            "role",
+            "text"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "protocol": {
+              "type": "string",
+              "const": "visor.v1"
+            },
+            "eventId": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "sentAt": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
               "const": "approval_request"
             },
             "approval": {

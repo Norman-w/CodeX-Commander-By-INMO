@@ -71,4 +71,17 @@ describe("visor.v1 protocol", () => {
     });
     expect(card.kind).toBe("permissions");
   });
+
+  it("accepts a voice caption event", async () => {
+    const { ServerControlMessageSchema } = await import("./index.js");
+    const message = ServerControlMessageSchema.parse({
+      protocol: "visor.v1",
+      eventId: 11,
+      sentAt: 1,
+      type: "caption",
+      role: "user",
+      text: "给首页加暗色模式"
+    });
+    expect(message.type).toBe("caption");
+  });
 });

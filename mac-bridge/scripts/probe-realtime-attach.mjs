@@ -59,7 +59,17 @@ try {
     outputModality: "audio",
     transport: { type: "websocket" },
     version: "v3"
-  }, 45_000);
+  }, 45_000).catch(async (error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!message.includes("does not support realtime conversation")) throw error;
+    threadId = await controller.startVoiceThread();
+    await controller.requestJsonRpc("thread/realtime/start", {
+      threadId,
+      outputModality: "audio",
+      transport: { type: "websocket" },
+      version: "v3"
+    }, 45_000);
+  });
 
   const pcm = Buffer.alloc(Math.floor(AUDIO_SAMPLE_RATE * 0.2 * 2), 0);
   await controller.requestJsonRpc("thread/realtime/appendAudio", {

@@ -85,6 +85,9 @@ export class CommanderBridge {
       this.audioResponseActive = false;
       this.broadcast(this.journal.create({ type: "assistant_audio_end", ...(transcript ? { transcript } : {}) }, false));
     });
+    this.voice.on("caption", (role: "user" | "assistant", text: string) => {
+      this.broadcast(this.journal.create({ type: "caption", role, text }, false));
+    });
     this.voice.on("error", (error: Error) => {
       if (this.audioResponseActive) {
         this.broadcast(this.journal.create({ type: "assistant_audio_end" }, false));
@@ -100,6 +103,13 @@ export class CommanderBridge {
       throw new Error("语音引擎未配置；Core realtime 需要可用的 Codex app-server");
     }
     await this.codex.start();
+    try {
+      await this.voice.probeRealtime();
+      this.logger.info("Core realtime session ready");
+    } catch (error) {
+      await this.codex.stop().catch(() => undefined);
+      throw error;
+    }
     this.ready = true;
     return pairing;
   }
