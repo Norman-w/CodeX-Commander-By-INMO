@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -10,13 +10,21 @@ loadDotenv({ path: resolve(packageRoot, "../.env"), quiet: true });
 const output = resolve(packageRoot, "src/generated/codex");
 const versionFile = resolve(output, ".codex-version");
 const temporary = `${output}.tmp-${process.pid}`;
+const fixtureGenerated = resolve(packageRoot, "test/fixtures/codex-generated/codex");
 const codex = process.env.COMMANDER_CODEX_BIN || "codex";
 
 let version;
 try {
   version = execFileSync(codex, ["--version"], { encoding: "utf8" }).trim();
 } catch (error) {
-  if (readVersion() && readVersion() === version) process.exit(0);
+  if (readVersion()) process.exit(0);
+  if (existsSync(fixtureGenerated)) {
+    rmSync(output, { recursive: true, force: true });
+    mkdirSync(output, { recursive: true });
+    cpSync(fixtureGenerated, output, { recursive: true });
+    writeFileSync(versionFile, "fixture-stub\n", "utf8");
+    process.exit(0);
+  }
   throw new Error(`Unable to run ${codex}. Install Codex or set COMMANDER_CODEX_BIN. ${String(error)}`);
 }
 

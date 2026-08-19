@@ -16,6 +16,7 @@ import type { TurnSteerResponse } from "../generated/codex/v2/TurnSteerResponse.
 
 import type { BridgeConfig } from "../config.js";
 import type { Logger } from "../log.js";
+import { resolveAppServerLaunch, type AppServerLaunchConfig } from "../app-server/discover.js";
 import { redactSecrets, sanitizeForVisor } from "../privacy/VisorText.js";
 import {
   CodexAppServerClient,
@@ -38,7 +39,8 @@ export type CodexControllerEvents = {
 };
 
 export class CodexController {
-  private readonly client: CodexAppServerClient;
+  private client!: CodexAppServerClient;
+  private readonly testLaunch?: AppServerLaunchConfig;
   private selectedThreadId: string | null = null;
   private selectedThreadSummary: ThreadSummary | null = null;
   private activeTurnId: string | null = null;
@@ -59,11 +61,24 @@ export class CodexController {
   constructor(
     private readonly config: BridgeConfig,
     private readonly logger: Logger,
-    appServerArgs?: readonly string[]
+    testFixture?: readonly string[]
   ) {
-    this.client = new CodexAppServerClient(config.codex.bin, logger, appServerArgs);
-    this.client.on("notification", (notification: CodexNotification) => this.handleNotification(notification));
-    this.client.on("request", (request: CodexServerRequest) => this.handleServerRequest(request));
+    if (testFixture) {
+      this.testLaunch = { mode: "raw", codexBin: config.codex.bin, args: [...testFixture] };
+    }
+  }
+
+  private async createClient(): Promise<CodexAppServerClient> {
+    const launch = this.testLaunch ?? await resolveAppServerLaunch({
+      codexBin: this.config.codex.bin,
+      mode: this.config.appServer.mode,
+      socketPath: this.config.appServer.socketPath
+    });
+    this.logger.info("Connecting to Codex app-server", { mode: launch.mode });
+    const client = new CodexAppServerClient(launch, this.logger);
+    client.on("notification", (notification: CodexNotification) => this.handleNotification(notification));
+    client.on("request", (request: CodexServerRequest) => this.handleServerRequest(request));
+    return client;
   }
 
   on<K extends keyof CodexControllerEvents>(event: K, listener: CodexControllerEvents[K]): () => void {
@@ -72,6 +87,7 @@ export class CodexController {
   }
 
   async start(): Promise<void> {
+    this.client = await this.createClient();
     await this.client.start();
     try {
       const account = await this.client.request<{ account: unknown | null; requiresOpenaiAuth: boolean }>("account/read", {});
@@ -110,6 +126,49 @@ export class CodexController {
   getActiveTurnId(): string | null { return this.activeTurnId; }
   getLatestFinal(): string { return this.latestFinal; }
   getPendingApproval(): ApprovalCard | null { return this.pendingApproval?.card ?? null; }
+
+  async ensureSelectedThread(): Promise<string> {
+    if (this.selectedThreadId) return this.selectedThreadId;
+    const params: ThreadStartParams = {
+      cwd: this.config.cwd,
+      approvalPolicy: this.config.codex.approvalPolicy,
+      approvalsReviewer: "user",
+      sandbox: this.config.codex.sandbox,
+      serviceName: "codex_commander_inmo",
+      threadSource: COMMANDER_THREAD_SOURCE,
+      config: realtimeSessionConfig(),
+      ...(this.config.codex.model ? { model: this.config.codex.model } : {})
+    };
+    const started = await this.client.request<ThreadStartResponse>("thread/start", params);
+    this.selectedThreadId = started.thread.id;
+    this.selectedThreadSummary = {
+      ...toThreadSummary(started.thread, this.config.cwd),
+      title: "眼镜遥控 · 新任务"
+    };
+    await this.client.request("thread/name/set", {
+      threadId: started.thread.id,
+      name: "眼镜遥控 · 新任务"
+    });
+    this.latestFinal = "";
+    return started.thread.id;
+  }
+
+  async startVoiceThread(): Promise<string> {
+    this.selectedThreadId = null;
+    this.selectedThreadSummary = null;
+    this.activeTurnId = null;
+    return this.ensureSelectedThread();
+  }
+
+  requestJsonRpc<T = unknown>(method: string, params?: Record<string, unknown>, timeoutMs?: number): Promise<T> {
+    return this.client.request<T>(method, params, timeoutMs);
+  }
+
+  subscribeNotifications(listener: (notification: CodexNotification) => void): () => void {
+    const wrapped = (notification: CodexNotification) => listener(notification);
+    this.client.on("notification", wrapped);
+    return () => this.client.off("notification", wrapped);
+  }
 
   async listThreads(): Promise<ThreadSummary[]> {
     const records = await this.listThreadRecords();
@@ -193,30 +252,7 @@ export class CodexController {
 
   async sendCommand(text: string, requestedThreadId?: string): Promise<{ threadId: string; turnId: string }> {
     if (requestedThreadId && requestedThreadId !== this.selectedThreadId) await this.selectThread(requestedThreadId);
-    if (!this.selectedThreadId) {
-      const params: ThreadStartParams = {
-        cwd: this.config.cwd,
-        approvalPolicy: this.config.codex.approvalPolicy,
-        approvalsReviewer: "user",
-        sandbox: this.config.codex.sandbox,
-        serviceName: "codex_commander_inmo",
-        threadSource: COMMANDER_THREAD_SOURCE,
-        ...(this.config.codex.model ? { model: this.config.codex.model } : {})
-      };
-      const started = await this.client.request<ThreadStartResponse>("thread/start", params);
-      this.selectedThreadId = started.thread.id;
-      this.selectedThreadSummary = {
-        ...toThreadSummary(started.thread, this.config.cwd),
-        title: "眼镜遥控 · 新任务"
-      };
-      await this.client.request("thread/name/set", {
-        threadId: started.thread.id,
-        name: "眼镜遥控 · 新任务"
-      });
-      this.latestFinal = "";
-    }
-
-    const threadId = this.selectedThreadId;
+    const threadId = await this.ensureSelectedThread();
     if (this.activeTurnId) {
       const params: TurnSteerParams = {
         threadId,
@@ -403,7 +439,7 @@ export class CodexController {
 }
 
 function toThreadSummary(thread: Thread, sensitiveRoot?: string): ThreadSummary {
-  const activeFlags = thread.status.type === "active" ? thread.status.activeFlags : [];
+  const activeFlags = thread.status.type === "active" ? (thread.status.activeFlags ?? []) : [];
   const status = activeFlags.includes("waitingOnApproval")
     ? "waiting_approval"
     : thread.status.type === "active"
@@ -523,6 +559,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 const COMMANDER_THREAD_SOURCE = "codex_commander_inmo";
+
+function realtimeSessionConfig(): NonNullable<ThreadStartParams["config"]> {
+  return {
+    features: { realtime_conversation: true },
+    realtime: { version: "v3", type: "conversational" }
+  };
+}
 
 function commanderThreadSource(config: BridgeConfig): string {
   return config.codex.contextBindingId
