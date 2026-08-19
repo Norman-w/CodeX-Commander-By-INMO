@@ -6,7 +6,7 @@
 
 ## 到货后一键安装
 
-Mac 首次只需准备一次 `.env`，填入 `OPENAI_API_KEY`、要让 Codex 操作的 `COMMANDER_CWD`，以及当前 Codex 可执行文件路径。`.env` 永远不会提交：
+Mac 首次只需准备一次 `.env`，填入要让 Codex 操作的 `COMMANDER_CWD` 和 Codex 可执行文件路径。Core realtime 不需要 `OPENAI_API_KEY`。`.env` 永远不会提交：
 
 ```bash
 cp .env.sample .env
@@ -53,21 +53,21 @@ INMO AIR3 (Kotlin / Android 14)
               │ WSS：visor.v1 + PCM16
               ▼
 Mac Bridge (Node.js 20 / TypeScript)
-  ├─ OpenAI Realtime WebSocket（中文语音与受限工具）
-  ├─ Codex App Server（仅本机 JSONL stdio）
+  ├─ Codex app-server Core realtime（thread/realtime websocket）
+  ├─ 可选 gui_shared：proxy 附着 ChatGPT.app 同一 app-server
   └─ sharp（图片限制尺寸后转 WebP）
 ```
 
 - `glasses-app/`：单 Activity、原生 View/Canvas、Coroutines/Flow、OkHttp、AudioRecord/AudioTrack、Android Keystore。
-- `mac-bridge/`：Node.js 20、TypeScript、ws、Zod、sharp；启动本机 `codex app-server --stdio`。
+- `mac-bridge/`：Node.js 20、TypeScript、ws、Zod、sharp；通过 `codex app-server` 的 `thread/realtime/*` 处理语音。
 - `protocol/`：Zod 源协议、二进制帧约定和生成的 JSON Schema。
 - `docs/`：配对、安全、AIR3 输入探针、功耗和测试说明。
 
-眼镜端没有 Compose、Unity、Flutter、React Native、本地模型、常驻前台服务或后台录音。Codex 登录和 OpenAI Key 永远只在 Mac。
+眼镜端没有 Compose、Unity、Flutter、React Native、本地模型、常驻前台服务或后台录音。Codex 登录只在 Mac；Core realtime 不需要 OpenAI API Key。
 
 ## 1. Mac Bridge
 
-要求：Node.js 20、pnpm 9、已登录可用的 Codex CLI，以及 OpenAI API Key。项目会在每次构建时用当前 Codex CLI 生成 App Server TypeScript 绑定；生成物不提交 Git，以免跨版本漂移。
+要求：Node.js 20、pnpm 9、已登录可用的 Codex（ChatGPT.app 或 CLI）。项目会在每次构建时用当前 Codex CLI 生成 App Server TypeScript 绑定；生成物不提交 Git，以免跨版本漂移。
 
 ```bash
 git clone https://github.com/Norman-w/CodeX-Commander-By-INMO.git
@@ -79,13 +79,16 @@ cp .env.sample .env
 编辑 `.env`，最少设置：
 
 ```dotenv
-OPENAI_API_KEY=your_openai_api_key
+COMMANDER_VOICE=codex-realtime
+COMMANDER_APP_SERVER_MODE=gui_shared
+COMMANDER_CODEX_BIN=/Applications/ChatGPT.app/Contents/Resources/codex
 COMMANDER_CWD=/absolute/path/to/the/project/codex/should/control
-COMMANDER_CODEX_BIN=/absolute/path/to/codex
 COMMANDER_THREAD_ID=
 COMMANDER_CONTEXT_BINDING_ID=
 COMMANDER_AUTO_SELECT_LATEST=true
 ```
+
+默认 `COMMANDER_APP_SERVER_MODE=gui_shared` 会 proxy 附着 ChatGPT.app 已运行的 app-server；若无 GUI，改为 `stdio`。详见 [Core 层语音附着](docs/CORE_VOICE_ATTACH.md)。
 
 默认安全配置是 `approvalPolicy=on-request`、`sandbox=workspace-write`、沙箱内网络关闭；需要 Codex 命令直接联网时再显式设置 `COMMANDER_NETWORK_ACCESS=true`。Bridge 仅监听 `127.0.0.1:8787`，不把 App Server 暴露到网络。Bridge 进程会把当前工作目录与一次性配对码写到本机终端，请勿公开分享启动日志。
 

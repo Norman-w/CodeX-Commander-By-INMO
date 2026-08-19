@@ -94,6 +94,35 @@ createInterface({ input: process.stdin, crlfDelay: Infinity }).on("line", (line)
       break;
     case "turn/interrupt": send({ id: message.id, result: {} }); break;
     case "turn/steer": send({ id: message.id, result: { turnId: turn.id } }); break;
+    case "thread/realtime/start":
+      send({ id: message.id, result: {} });
+      send({ method: "thread/realtime/started", params: { threadId: message.params?.threadId || thread.id } });
+      break;
+    case "thread/realtime/appendAudio":
+      send({ id: message.id, result: {} });
+      send({
+        method: "thread/realtime/outputAudio/delta",
+        params: {
+          threadId: message.params?.threadId || thread.id,
+          audio: {
+            data: Buffer.from([1, 0, 2, 0]).toString("base64"),
+            sampleRate: 24_000,
+            numChannels: 1
+          }
+        }
+      });
+      send({
+        method: "thread/realtime/transcript/done",
+        params: { threadId: message.params?.threadId || thread.id, role: "assistant", text: "收到" }
+      });
+      break;
+    case "thread/realtime/appendSpeech":
+    case "thread/realtime/stop":
+      send({ id: message.id, result: {} });
+      if (message.method === "thread/realtime/stop") {
+        send({ method: "thread/realtime/closed", params: { threadId: message.params?.threadId || thread.id } });
+      }
+      break;
   }
   if (message.id === "approval-1" && (message.result?.decision === "accept" || message.result?.permissions?.network?.enabled === true)) {
     const finalItem = { type: "agentMessage", id: "item-final", text: "测试完成", phase: "final_answer", memoryCitation: null };

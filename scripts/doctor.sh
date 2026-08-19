@@ -88,9 +88,36 @@ case ${COMMANDER_THREAD_ID:-} in
 esac
 
 case ${OPENAI_API_KEY:-} in
-  ''|your_openai_api_key|sk-your-key-here) fail "OPENAI_API_KEY 尚未配置；它只保存在本机 .env" ;;
-  *) ok "OpenAI Realtime API Key 已配置（未显示内容）" ;;
+  ''|your_openai_api_key|sk-your-key-here) ok "未配置 OPENAI_API_KEY（Core realtime 不需要）" ;;
+  *) ok "OPENAI_API_KEY 已配置（仅 COMMANDER_VOICE=openai 时需要）" ;;
 esac
+
+case ${COMMANDER_APP_SERVER_MODE:-gui_shared} in
+  gui_shared) ok "app-server 模式：gui_shared（附着 ChatGPT）" ;;
+  stdio) ok "app-server 模式：stdio（独立 spawn）" ;;
+  *) fail "COMMANDER_APP_SERVER_MODE 无效；使用 gui_shared 或 stdio" ;;
+esac
+
+case ${COMMANDER_VOICE:-codex-realtime} in
+  codex-realtime|auto|codex) ok "语音模式：Core realtime（thread/realtime）" ;;
+  openai) fail "COMMANDER_VOICE=openai 已弃用；请改用 codex-realtime" ;;
+  *) fail "COMMANDER_VOICE 无效；推荐 codex-realtime" ;;
+esac
+
+if [ -x "$codex_bin" ] || [ -f "/Applications/ChatGPT.app/Contents/Resources/codex" ]; then
+  if pnpm --filter @codex-commander/mac-bridge build >/dev/null 2>&1; then
+    attach_json=$(node "$project_root/mac-bridge/scripts/probe-app-server-attach.mjs" 2>/dev/null || true)
+    if printf '%s' "$attach_json" | grep -q '"attachReady": true'; then
+      ok "GUI app-server control socket 可用"
+    else
+      printf '  [提示] GUI app-server socket 不可用；请打开 ChatGPT.app 或设 COMMANDER_APP_SERVER_MODE=stdio\n'
+    fi
+  else
+    printf '  [提示] mac-bridge 尚未构建，跳过 app-server 附着探测\n'
+  fi
+else
+  printf '  [提示] 跳过 app-server 附着探测（Codex 不可用）\n'
+fi
 
 tailscale_bin=${COMMANDER_TAILSCALE_BIN:-tailscale}
 if [ "$tailscale_bin" = "tailscale" ] && ! command -v tailscale >/dev/null 2>&1 && [ -x /Applications/Tailscale.app/Contents/MacOS/Tailscale ]; then

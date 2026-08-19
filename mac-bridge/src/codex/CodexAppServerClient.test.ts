@@ -9,7 +9,7 @@ import { CodexAppServerClient, type CodexNotification, type CodexServerRequest }
 describe("CodexAppServerClient", () => {
   it("initializes, correlates responses, and forwards notifications and requests", async () => {
     const fixture = resolve(dirname(fileURLToPath(import.meta.url)), "../../test/fixtures/fake-codex-app-server.mjs");
-    const client = new CodexAppServerClient(process.execPath, new Logger("error"), [fixture]);
+    const client = CodexAppServerClient.fromRaw(process.execPath, [fixture], new Logger("error"));
     const notifications: CodexNotification[] = [];
     const requests: CodexServerRequest[] = [];
     client.on("notification", (value) => notifications.push(value));

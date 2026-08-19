@@ -9,9 +9,9 @@ import type { BridgeConfig } from "../config.js";
 import { CodexController } from "../codex/CodexController.js";
 import type { Logger } from "../log.js";
 import { ImageService } from "../media/ImageService.js";
-import { RealtimeVoiceClient, VoiceClientError } from "../realtime/RealtimeVoiceClient.js";
-import { createVoiceToolRouter } from "../realtime/VoiceToolRouter.js";
 import { PairingStore, type PairingSnapshot } from "../security/PairingStore.js";
+import { createVoiceClient } from "../voice/createVoiceClient.js";
+import { VoiceClientError, type CommanderVoice } from "../voice/types.js";
 import { EventJournal, RequestDeduplicator } from "./EventJournal.js";
 
 export type BridgeTransport = {
@@ -32,7 +32,7 @@ export class CommanderBridge {
   private readonly pairing: PairingStore;
   private readonly codex: CodexController;
   private readonly images: ImageService;
-  private readonly voice: RealtimeVoiceClient;
+  private readonly voice: CommanderVoice;
   private readonly journal = new EventJournal();
   private readonly dedupe = new RequestDeduplicator();
   private readonly imageCards: ImageCard[] = [];
@@ -48,9 +48,11 @@ export class CommanderBridge {
     this.pairing = new PairingStore(config.pairingFile);
     this.codex = new CodexController(config, logger);
     this.images = new ImageService(config.mediaRoots, mediaOutputRoot);
-    this.voice = new RealtimeVoiceClient(
-      config.realtime,
-      createVoiceToolRouter(this.codex, this.images, (image) => this.publishImage(image)),
+    this.voice = createVoiceClient(
+      config,
+      this.codex,
+      this.images,
+      (image) => this.publishImage(image),
       logger
     );
 
@@ -95,7 +97,7 @@ export class CommanderBridge {
   async start(): Promise<PairingSnapshot> {
     const pairing = await this.pairing.initialize();
     if (!this.voice.isConfigured()) {
-      throw new Error("OPENAI_API_KEY 未配置；请在 Mac 的 .env 中填写后再启动 Bridge");
+      throw new Error("语音引擎未配置；Core realtime 需要可用的 Codex app-server");
     }
     await this.codex.start();
     this.ready = true;

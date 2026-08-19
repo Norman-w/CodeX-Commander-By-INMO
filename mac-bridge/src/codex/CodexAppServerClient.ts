@@ -1,9 +1,13 @@
+//#region 导入/依赖
 import { EventEmitter } from "node:events";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
 
+import type { AppServerLaunchConfig } from "../app-server/discover.js";
 import type { Logger } from "../log.js";
+//#endregion
 
+//#region 模型/类型
 type JsonRpcId = string | number;
 type JsonObject = Record<string, unknown>;
 
@@ -15,7 +19,9 @@ type PendingRequest = {
 
 export type CodexNotification = { method: string; params?: JsonObject };
 export type CodexServerRequest = { id: JsonRpcId; method: string; params?: JsonObject };
+//#endregion
 
+//#region 公开 API
 export class CodexAppServerClient extends EventEmitter {
   private process?: ChildProcessWithoutNullStreams;
   private nextId = 1;
@@ -23,17 +29,37 @@ export class CodexAppServerClient extends EventEmitter {
   private stopping = false;
 
   constructor(
-    private readonly codexBin: string,
-    private readonly logger: Logger,
-    private readonly appServerArgs: readonly string[] = ["app-server", "--stdio"]
+    private readonly launch: AppServerLaunchConfig,
+    private readonly logger: Logger
   ) {
     super();
+  }
+
+  static fromStdio(codexBin: string, logger: Logger, extraArgs: readonly string[] = []): CodexAppServerClient {
+    return new CodexAppServerClient({ mode: "stdio", codexBin, args: ["app-server", "--stdio", ...extraArgs] }, logger);
+  }
+
+  static fromRaw(codexBin: string, args: readonly string[], logger: Logger): CodexAppServerClient {
+    return new CodexAppServerClient({ mode: "raw", codexBin, args }, logger);
+  }
+
+  static fromProxy(codexBin: string, socketPath: string, logger: Logger): CodexAppServerClient {
+    return new CodexAppServerClient({
+      mode: "proxy",
+      codexBin,
+      socketPath,
+      args: ["app-server", "proxy", "--sock", socketPath]
+    }, logger);
+  }
+
+  getLaunchMode(): AppServerLaunchConfig["mode"] {
+    return this.launch.mode;
   }
 
   async start(): Promise<void> {
     if (this.process) return;
     this.stopping = false;
-    const child = spawn(this.codexBin, [...this.appServerArgs], {
+    const child = spawn(this.launch.codexBin, [...this.launch.args], {
       stdio: ["pipe", "pipe", "pipe"],
       env: sanitizedChildEnvironment(process.env)
     });
@@ -159,7 +185,9 @@ export class CodexAppServerClient extends EventEmitter {
     this.pending.clear();
   }
 }
+//#endregion
 
+//#region 方法/工具
 function sanitizedChildEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const result = { ...env };
   for (const name of [
@@ -173,3 +201,4 @@ function sanitizedChildEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   }
   return result;
 }
+//#endregion
