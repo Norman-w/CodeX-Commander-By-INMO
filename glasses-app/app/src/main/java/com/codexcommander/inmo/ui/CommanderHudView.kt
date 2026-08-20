@@ -34,6 +34,7 @@ class CommanderHudView @JvmOverloads constructor(
     private var firstTapApprovalRequestId: String? = null
     private var touchDownX = 0f
     private var touchDownY = 0f
+    private var lastTapY = 0f
     private val startHold = Runnable {
         if (
             !swiping &&
@@ -142,7 +143,8 @@ class CommanderHudView @JvmOverloads constructor(
 
     override fun performClick(): Boolean {
         super.performClick()
-        controller?.onSingleTap()
+        if (state.threadPickerOpen) controller?.onThreadPickerTap(isNewSessionRow(lastTapY))
+        else controller?.onSingleTap()
         if (state.pttMode == PttMode.TOGGLE || state.imageVisible || state.completionAwaitingReport) {
             performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
         }
@@ -171,6 +173,7 @@ class CommanderHudView @JvmOverloads constructor(
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 handler.removeCallbacks(startHold)
+                if (event.actionMasked == MotionEvent.ACTION_UP) lastTapY = event.y
                 if (holdStarted) {
                     controller?.onPttUp()
                     holdStarted = false
@@ -178,6 +181,12 @@ class CommanderHudView @JvmOverloads constructor(
             }
         }
         return true
+    }
+
+    private fun isNewSessionRow(y: Float): Boolean {
+        val pickerTop = height * 0.08f + sp(42)
+        val newRowTop = pickerTop + sp(22) + PICKER_ROWS * sp(54)
+        return y >= newRowTop - sp(30) && y <= newRowTop + sp(30)
     }
 
     override fun performLongClick(): Boolean {

@@ -159,6 +159,13 @@ class CommanderController(context: Context) : BridgeClient.Listener {
         }
     }
 
+    fun onThreadPickerTap(onNewSessionRow: Boolean) {
+        val current = mutableState.value
+        if (!current.threadPickerOpen) return
+        if (onNewSessionRow) createNewVoiceTarget()
+        else update { it.copy(threadPickerOpen = false, threadPickerNew = false, error = null) }
+    }
+
     fun onDoubleTap(expectedApprovalRequestId: String? = null) {
         val current = mutableState.value
         val approval = current.pendingApproval
