@@ -300,7 +300,7 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     body { margin: 0; min-height: 100vh; overflow-x: hidden; background: var(--bg); }
     body::before { content: ""; position: fixed; inset: 0; pointer-events: none; opacity: .32; background-image: linear-gradient(rgba(255,255,255,.045) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px); background-size: 42px 42px; mask-image: linear-gradient(to bottom, black, transparent 82%); }
     body::after { content: ""; position: fixed; inset: -20%; pointer-events: none; background: radial-gradient(circle at 50% 32%, rgba(243,210,122,.07), transparent 28%), radial-gradient(circle at 0% 50%, rgba(114,185,255,.09), transparent 30%), radial-gradient(circle at 100% 50%, rgba(255,154,106,.08), transparent 30%); }
-    main { position: relative; z-index: 1; display: flex; width: min(1480px, 100%); height: 100svh; min-height: 560px; flex-direction: column; margin: 0 auto; padding: 26px clamp(18px, 4vw, 64px); overflow: hidden; }
+    main { position: relative; z-index: 1; display: flex; width: min(1480px, 100%); min-height: 100svh; flex-direction: column; margin: 0 auto; padding: 26px clamp(18px, 4vw, 64px); overflow: visible; }
     .topbar { position: relative; z-index: 12; display: flex; align-items: center; justify-content: space-between; gap: 24px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
     .brand { display: flex; align-items: center; gap: 11px; color: var(--ink); font-size: 13px; font-weight: 700; letter-spacing: .1em; }
     .brand-mark { width: 10px; height: 10px; border: 2px solid var(--signal); border-radius: 50%; box-shadow: 0 0 0 5px rgba(243,210,122,.1); }
@@ -308,8 +308,8 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     .readout-label { color: var(--dim); }
     .status-toggle { width: auto; min-height: 34px; padding: 7px 11px; border-color: rgba(244,238,230,.22); color: var(--muted); background: rgba(255,255,255,.05); font: 10px "SF Mono", Menlo, monospace; letter-spacing: .06em; }
     .status-toggle[data-open="true"] { border-color: rgba(243,210,122,.65); color: var(--signal); }
-    .workspace { display: grid; grid-template-columns: minmax(132px, .65fr) minmax(460px, 1.8fr) minmax(132px, .65fr); flex: 1; min-height: 0; gap: clamp(24px, 5vw, 80px); padding: 24px 0 18px; }
-    .signal-rail { position: relative; display: flex; min-height: 0; flex-direction: column; justify-content: space-between; padding: 18px 0; }
+    .workspace { display: grid; grid-template-columns: minmax(132px, .65fr) minmax(460px, 1.8fr) minmax(132px, .65fr); flex: 1 0 auto; min-height: 650px; gap: clamp(24px, 5vw, 80px); padding: 24px 0 18px; }
+    .signal-rail { position: relative; display: flex; min-height: 650px; flex-direction: column; justify-content: space-between; padding: 18px 0; }
     .signal-rail::before { content: ""; position: absolute; top: 0; bottom: 0; width: 1px; background: linear-gradient(transparent, var(--line) 14%, var(--line) 86%, transparent); }
     .signal-left::before { right: -16px; }
     .signal-right::before { left: -16px; }
@@ -318,14 +318,14 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     .rail-name { color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
     .rail-status { color: var(--input); font-size: 12px; }
     .signal-right .rail-status { color: var(--output); }
-    .rail-track { position: relative; flex: 1; width: 48px; min-height: 0; margin: 24px auto; overflow: hidden; border: 1px solid var(--line); background: rgba(255,255,255,.025); }
+    .rail-track { position: relative; flex: 1; width: 48px; min-height: 360px; margin: 24px auto; overflow: hidden; border: 1px solid var(--line); background: rgba(255,255,255,.025); }
     .rail-track::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(to bottom, transparent 0, transparent 15px, rgba(255,255,255,.12) 16px); }
     .rail-fill { position: absolute; right: 0; bottom: 0; left: 0; z-index: 1; height: 0; background: linear-gradient(to top, rgba(114,185,255,.18), var(--input)); box-shadow: 0 0 26px rgba(114,185,255,.48); transition: height .12s linear; }
     .signal-right .rail-fill { background: linear-gradient(to top, rgba(255,154,106,.16), var(--output)); box-shadow: 0 0 26px rgba(255,154,106,.42); }
     .rail-fill::after { content: ""; position: absolute; top: 0; right: 0; left: 0; height: 2px; background: #fff; box-shadow: 0 0 13px currentColor; }
     .rail-values { display: grid; gap: 6px; color: var(--muted); font: 11px "SF Mono", Menlo, monospace; }
     .rail-values span:last-child { color: var(--dim); }
-    .call-stage { position: relative; display: flex; min-height: 0; flex-direction: column; align-items: center; justify-content: center; padding: 10px 0 0; text-align: center; }
+    .call-stage { position: relative; display: flex; min-height: 650px; flex-direction: column; align-items: center; justify-content: center; padding: 10px 0 0; text-align: center; }
     .stage-kicker { color: var(--signal); font: 11px "SF Mono", Menlo, monospace; letter-spacing: .2em; text-transform: uppercase; }
     h1 { max-width: 700px; margin: 18px 0 12px; font-size: clamp(44px, 7vw, 92px); font-weight: 500; letter-spacing: -.075em; line-height: .94; }
     .lede { max-width: 530px; margin: 0; color: var(--muted); font-size: 15px; line-height: 1.65; }
@@ -403,7 +403,7 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     .hint { color: var(--muted); font-size: 12px; line-height: 1.55; }
     footer { display: flex; justify-content: space-between; gap: 20px; margin-top: 22px; color: var(--dim); font: 10px "SF Mono", Menlo, monospace; letter-spacing: .08em; text-transform: uppercase; }
     @media (max-width: 900px) { .workspace { grid-template-columns: 86px minmax(0, 1fr) 86px; gap: 24px; } h1 { font-size: clamp(42px, 8vw, 72px); } }
-    @media (max-width: 680px) { main { padding-top: 20px; } .topbar { align-items: flex-start; flex-direction: column; } .system-readout { align-self: stretch; justify-content: space-between; } .workspace { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; min-height: 0; padding-top: 16px; } .call-stage { grid-column: 1 / -1; grid-row: 1; min-height: 0; padding-top: 0; } .signal-left { grid-column: 1; grid-row: 2; min-height: 0; } .signal-right { grid-column: 2; grid-row: 2; min-height: 0; } .rail-track { min-height: 80px; margin: 10px auto; } .control-dock { margin-top: 22px; } .control-grid, .action-row { grid-template-columns: 1fr; } .voice-event { grid-template-columns: 1fr; gap: 7px; } .log-panel { right: 12px; bottom: 12px; left: 12px; max-height: 58svh; padding: 18px 16px 14px; } footer { flex-direction: column; } }
+    @media (max-width: 680px) { main { min-height: 100svh; padding-top: 20px; } .topbar { align-items: flex-start; flex-direction: column; } .system-readout { align-self: stretch; justify-content: space-between; } .workspace { grid-template-columns: repeat(2, minmax(0, 1fr)); flex: 0 0 auto; gap: 12px; min-height: 0; padding-top: 16px; } .call-stage { grid-column: 1 / -1; grid-row: 1; min-height: 0; padding-top: 0; } .signal-left { grid-column: 1; grid-row: 2; min-height: 0; } .signal-right { grid-column: 2; grid-row: 2; min-height: 0; } .rail-track { min-height: 80px; margin: 10px auto; } .control-dock { margin-top: 22px; } .control-grid, .action-row { grid-template-columns: 1fr; } .voice-event { grid-template-columns: 1fr; gap: 7px; } .log-panel { right: 12px; bottom: 12px; left: 12px; max-height: 58svh; padding: 18px 16px 14px; } footer { flex-direction: column; } }
     @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }
   </style>
 </head>
