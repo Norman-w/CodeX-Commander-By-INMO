@@ -302,7 +302,7 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     body::after { content: ""; position: fixed; inset: -20%; pointer-events: none; background: radial-gradient(circle at 50% 32%, rgba(243,210,122,.07), transparent 28%), radial-gradient(circle at 0% 50%, rgba(114,185,255,.09), transparent 30%), radial-gradient(circle at 100% 50%, rgba(255,154,106,.08), transparent 30%); }
     main { position: relative; z-index: 1; width: min(1480px, 100%); margin: 0 auto; padding: 26px clamp(18px, 4vw, 64px) 56px; }
     .topbar { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
-    .brand { display: flex; align-items: center; gap: 11px; color: var(--ink); font-size: 13px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+    .brand { display: flex; align-items: center; gap: 11px; color: var(--ink); font-size: 13px; font-weight: 700; letter-spacing: .1em; }
     .brand-mark { width: 10px; height: 10px; border: 2px solid var(--signal); border-radius: 50%; box-shadow: 0 0 0 5px rgba(243,210,122,.1); }
     .system-readout { display: flex; align-items: center; gap: 12px; color: var(--muted); font: 11px "SF Mono", Menlo, monospace; letter-spacing: .1em; text-transform: uppercase; }
     .readout-label { color: var(--dim); }
@@ -339,7 +339,23 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     .call-orb[data-phase="error"] .orb-core { background: var(--danger); box-shadow: 0 0 30px rgba(255,115,107,.7); }
     @keyframes dialPulse { 0%, 100% { transform: scale(1); opacity: .72; } 50% { transform: scale(1.05); opacity: 1; } }
     .voice-state { min-height: 24px; color: var(--signal); font-size: 16px; font-weight: 700; }
-    .call-button { width: min(260px, 100%); margin-top: 18px; }
+    .status-lights { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px 20px; margin-top: 14px; }
+    .status-light { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font: 10px "SF Mono", Menlo, monospace; letter-spacing: .08em; text-transform: uppercase; }
+    .status-light i { display: block; width: 7px; height: 7px; border-radius: 50%; background: var(--dim); box-shadow: 0 0 0 transparent; }
+    .status-light[data-state="busy"] i { background: var(--signal); box-shadow: 0 0 12px rgba(243,210,122,.78); animation: lightPulse 1.2s ease-in-out infinite; }
+    .status-light[data-state="on"] i { background: #83e6b7; box-shadow: 0 0 12px rgba(131,230,183,.78); }
+    .status-light[data-state="error"] i { background: var(--danger); box-shadow: 0 0 12px rgba(255,115,107,.78); }
+    @keyframes lightPulse { 50% { opacity: .42; } }
+    .call-console { display: grid; justify-items: center; margin-top: 18px; }
+    .call-button { position: relative; display: grid; width: 116px; height: 116px; min-height: 116px; place-items: center; margin: 0; border: 8px solid rgba(243,210,122,.22); border-radius: 50%; color: #17140e; background: radial-gradient(circle at 35% 28%, #ffe8a9, var(--signal) 58%, #bb963d); box-shadow: inset 0 3px 2px rgba(255,255,255,.48), inset 0 -8px 13px rgba(90,60,10,.25), 0 0 0 8px rgba(243,210,122,.06), 0 15px 30px rgba(0,0,0,.28); }
+    .call-button::before { content: ""; position: absolute; inset: -15px; border: 1px solid rgba(243,210,122,.2); border-radius: 50%; }
+    .call-button svg { width: 43px; height: 43px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2.5; transition: transform .24s ease; }
+    .call-button:active:not(:disabled) { transform: translateY(4px) scale(.97); box-shadow: inset 0 7px 14px rgba(90,60,10,.28), 0 7px 15px rgba(0,0,0,.24); }
+    .call-button[data-active="true"] { border-color: rgba(255,115,107,.28); color: #fff4ef; background: radial-gradient(circle at 35% 28%, #ff9a8e, var(--danger) 60%, #a33c43); box-shadow: inset 0 3px 2px rgba(255,255,255,.25), inset 0 -8px 13px rgba(75,12,20,.3), 0 0 0 8px rgba(255,115,107,.07), 0 15px 30px rgba(0,0,0,.28); }
+    .call-button[data-active="true"]::before { border-color: rgba(255,115,107,.2); }
+    .call-button[data-active="true"] svg { transform: rotate(135deg); }
+    .call-action-name { margin-top: 18px; color: var(--ink); font-size: 14px; font-weight: 800; letter-spacing: .08em; }
+    .call-action-note { margin-top: 5px; color: var(--dim); font: 10px "SF Mono", Menlo, monospace; }
     .control-dock { width: min(620px, 100%); margin-top: 38px; padding: 16px; border: 1px solid var(--line); background: var(--panel); box-shadow: 0 24px 80px rgba(0,0,0,.2); backdrop-filter: blur(18px); }
     .control-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
     .field { display: grid; gap: 8px; text-align: left; }
@@ -355,18 +371,26 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     button.primary:hover:not(:disabled) { background: #ffe19b; box-shadow: 0 12px 35px rgba(243,210,122,.18); }
     button[data-active="true"] { border-color: var(--output); color: #20130d; background: var(--output); }
     .action-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
+    .audio-key { position: relative; display: flex; align-items: center; justify-content: flex-start; gap: 12px; min-height: 66px; padding: 10px 14px; border-color: rgba(244,238,230,.18); background: linear-gradient(145deg, rgba(255,255,255,.1), rgba(0,0,0,.16)); box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 8px 18px rgba(0,0,0,.15); text-align: left; }
+    .audio-key:hover:not(:disabled) { border-color: rgba(243,210,122,.65); background: linear-gradient(145deg, rgba(243,210,122,.18), rgba(0,0,0,.16)); }
+    .audio-key:active:not(:disabled) { transform: translateY(3px); box-shadow: inset 0 5px 12px rgba(0,0,0,.25); }
+    .key-icon { display: grid; width: 38px; height: 38px; flex: 0 0 38px; place-items: center; border: 1px solid rgba(244,238,230,.2); border-radius: 50%; color: var(--signal); background: rgba(0,0,0,.18); }
+    .key-icon svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+    .sample-key .key-icon svg { fill: currentColor; stroke: none; }
+    .talk-key[data-active="true"] { border-color: rgba(114,185,255,.7); background: linear-gradient(145deg, rgba(114,185,255,.2), rgba(0,0,0,.16)); }
+    .talk-key[data-active="true"] .key-icon { color: var(--input); box-shadow: 0 0 18px rgba(114,185,255,.35); }
     .status-line { min-height: 22px; margin-top: 14px; color: var(--signal); font-size: 12px; text-align: left; }
     .control-hint { margin-top: 4px; color: var(--muted); font-size: 12px; line-height: 1.5; text-align: left; }
     .log-panel { margin-top: 2px; padding-top: 22px; border-top: 1px solid var(--line); }
     .log-heading { display: flex; align-items: end; justify-content: space-between; gap: 20px; }
     .log-title { margin-top: 7px; font-size: 24px; letter-spacing: -.04em; }
     .meter-status { color: var(--signal); font: 11px "SF Mono", Menlo, monospace; }
-    .voice-events { display: grid; gap: 1px; max-height: 360px; margin-top: 18px; overflow: auto; border-top: 1px solid var(--line); }
+    .voice-events { display: grid; gap: 1px; min-height: 76px; max-height: 360px; margin-top: 18px; overflow-y: auto; overscroll-behavior: auto; border-top: 1px solid var(--line); scrollbar-color: rgba(244,238,230,.28) transparent; }
     .voice-event { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 18px; padding: 16px 4px; border-bottom: 1px solid var(--line); color: var(--ink); white-space: pre-wrap; word-break: break-word; }
     .voice-event.user { color: var(--input); }
     .voice-event.assistant { color: var(--output); }
     .voice-event.error { color: var(--danger); }
-    .voice-event-label { color: var(--muted); font: 10px "SF Mono", Menlo, monospace; letter-spacing: .08em; text-transform: uppercase; }
+    .voice-event-label { color: var(--muted); font: 10px "SF Mono", Menlo, monospace; letter-spacing: .08em; }
     .voice-event.error .voice-event-label { color: var(--danger); }
     .hint { color: var(--muted); font-size: 12px; line-height: 1.55; }
     footer { display: flex; justify-content: space-between; gap: 20px; margin-top: 22px; color: var(--dim); font: 10px "SF Mono", Menlo, monospace; letter-spacing: .08em; text-transform: uppercase; }
@@ -378,51 +402,67 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
 <body>
   <main>
     <header class="topbar">
-      <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span>CodeX Commander / Bridge</span></div>
-      <div class="system-readout"><span class="readout-label">LINK</span><span id="linkReadout">未接通</span></div>
+      <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span>Code X</span></div>
+      <div class="system-readout"><span class="readout-label">通话</span><span id="linkReadout">未接通</span></div>
     </header>
     <div class="workspace">
       <aside class="signal-rail signal-left" aria-label="输入音频电平">
-        <div class="rail-heading"><span class="rail-kicker">CHANNEL 01</span><span class="rail-name">Input / Mic</span><span id="inputStatus" class="rail-status">未采集</span></div>
+        <div class="rail-heading"><span class="rail-kicker">输入 01</span><span class="rail-name">麦克风</span><span id="inputStatus" class="rail-status">未采集</span></div>
         <div class="rail-track"><div id="inputFill" class="rail-fill"></div></div>
         <div class="rail-values"><span id="inputRms">RMS 0.000</span><span id="inputPeak">PEAK 0.000</span></div>
       </aside>
       <section class="call-stage">
-        <div class="stage-kicker">Native voice link / current session</div>
-        <h1>原生 Voice Chat</h1>
-        <p class="lede">先拨通，再选择输入与回放。通话未接通前，所有音频动作保持锁定。</p>
+        <div class="stage-kicker">当前通话</div>
+        <h1>Code X</h1>
+        <p class="lede">先拨通，再开始说话或播放测试音频。</p>
         <div id="callOrb" class="call-orb" data-phase="stopped" aria-hidden="true"><span class="orb-core"></span></div>
-        <div id="voiceChatStatus" class="voice-state">未接通 · 音频控制已锁定</div>
-        <button id="voiceChatButton" class="primary call-button" type="button">拨打电话</button>
+        <div id="voiceChatStatus" class="voice-state">未接通</div>
+        <div class="status-lights" aria-live="polite">
+          <span id="callLight" class="status-light" data-state="off"><i></i><span id="callLightText">未接通</span></span>
+          <span id="inputLight" class="status-light" data-state="off"><i></i><span id="inputLightText">输入待机</span></span>
+          <span id="outputLight" class="status-light" data-state="off"><i></i><span id="outputLightText">播放待机</span></span>
+        </div>
+        <div class="call-console">
+          <button id="voiceChatButton" class="primary call-button" type="button" aria-label="拨打电话">
+            <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M15.2 8.5c1.2-.9 2.9-.7 3.8.5l4.2 5.8c.8 1.1.6 2.7-.4 3.6l-2.9 2.4c2 4 5.2 7.2 9.2 9.2l2.4-2.9c.9-1.1 2.5-1.3 3.6-.4l5.8 4.2c1.2.9 1.4 2.6.5 3.8l-2.5 3.2c-1.5 1.9-4.1 2.6-6.4 1.7-6.7-2.6-12.2-6.5-16.5-10.8C11.7 24.5 7.8 19 5.2 12.3c-.9-2.3-.2-4.9 1.7-6.4l3.2-2.5c1.2-.9 2.9-.7 3.8.5l1.3 1.8Z" /></svg>
+          </button>
+          <span id="voiceChatButtonLabel" class="call-action-name">拨打电话</span>
+          <span class="call-action-note">接通后按此键挂断</span>
+        </div>
         <div class="control-dock">
           <div class="control-grid">
-            <label class="field"><span class="field-label">输入来源</span><select id="audioInput" disabled><option value="visor">眼镜麦克风</option><option value="mac">电脑麦克风</option></select><span class="field-note">电脑麦克风来自当前 Chrome 页面；眼镜由 PTT 触发。</span></label>
-            <label class="field"><span class="field-label">服务器回放</span><select id="localAudio" disabled><option value="visor_only">仅眼镜</option><option value="mac_only">仅电脑</option><option value="mac_and_visor">电脑 + 眼镜</option></select><span class="field-note">服务器原生 WebRTC 音频，不使用 TTS。</span></label>
+            <label class="field"><span class="field-label">输入来源</span><select id="audioInput" disabled><option value="visor">眼镜麦克风</option><option value="mac">电脑麦克风</option></select><span class="field-note">电脑麦克风，或眼镜按住 PTT。</span></label>
+            <label class="field"><span class="field-label">回复播放到</span><select id="localAudio" disabled><option value="visor_only">仅眼镜</option><option value="mac_only">仅电脑</option><option value="mac_and_visor">电脑 + 眼镜</option></select><span class="field-note">选择 Code X 的声音播放位置。</span></label>
           </div>
-          <div class="action-row"><button id="sampleButton" type="button" disabled>播放 hi there 探针</button><button id="testButton" type="button" disabled>开始说话</button></div>
+          <div class="action-row">
+            <button id="sampleButton" class="audio-key sample-key" type="button" disabled><span class="key-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m9 6 9 6-9 6V6Z" /></svg></span><span id="sampleButtonLabel">播放探针</span></button>
+            <button id="testButton" class="audio-key talk-key" type="button" disabled><span class="key-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="8" y="3" width="8" height="12" rx="4" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6" /></svg></span><span id="testButtonLabel">开始说话</span></button>
+          </div>
           <div id="status" class="status-line">先拨打电话，接通后才能使用音频。</div>
           <div id="controlHint" class="control-hint">电话状态会像真实通话一样控制音频设备与操作权限。</div>
         </div>
       </section>
       <aside class="signal-rail signal-right" aria-label="服务器返回音频电平">
-        <div class="rail-heading"><span class="rail-kicker">CHANNEL 02</span><span class="rail-name">Output / Reply</span><span id="outputStatus" class="rail-status">未收到</span></div>
+        <div class="rail-heading"><span class="rail-kicker">输出 02</span><span class="rail-name">服务器回复</span><span id="outputStatus" class="rail-status">未收到</span></div>
         <div class="rail-track"><div id="outputFill" class="rail-fill"></div></div>
         <div class="rail-values"><span id="outputRms">RMS 0.000</span><span id="outputPeak">PEAK 0.000</span></div>
       </aside>
     </div>
     <section class="log-panel" aria-live="polite">
-      <div class="log-heading"><div><div class="rail-kicker">SESSION TRANSCRIPT</div><div class="log-title">通话记录</div></div><div id="voiceEventStatus" class="meter-status">等待服务器返回</div></div>
+      <div class="log-heading"><div><div class="rail-kicker">对话记录</div><div class="log-title">通话内容</div></div><div id="voiceEventStatus" class="meter-status">暂无对话内容</div></div>
       <div id="voiceEvents" class="voice-events"></div>
     </section>
-    <footer><span>ChatGPT login state / Chromium WebRTC</span><span>Local bridge · 127.0.0.1:8787</span></footer>
   </main>
   <script>
     const inputControl = document.querySelector('#audioInput');
     const outputControl = document.querySelector('#localAudio');
     const voiceChatButton = document.querySelector('#voiceChatButton');
+    const voiceChatButtonLabel = document.querySelector('#voiceChatButtonLabel');
     const voiceChatStatus = document.querySelector('#voiceChatStatus');
     const sampleButton = document.querySelector('#sampleButton');
+    const sampleButtonLabel = document.querySelector('#sampleButtonLabel');
     const testButton = document.querySelector('#testButton');
+    const testButtonLabel = document.querySelector('#testButtonLabel');
     const status = document.querySelector('#status');
     const inputFill = document.querySelector('#inputFill');
     const outputFill = document.querySelector('#outputFill');
@@ -437,6 +477,12 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     const linkReadout = document.querySelector('#linkReadout');
     const callOrb = document.querySelector('#callOrb');
     const controlHint = document.querySelector('#controlHint');
+    const callLight = document.querySelector('#callLight');
+    const callLightText = document.querySelector('#callLightText');
+    const inputLight = document.querySelector('#inputLight');
+    const inputLightText = document.querySelector('#inputLightText');
+    const outputLight = document.querySelector('#outputLight');
+    const outputLightText = document.querySelector('#outputLightText');
     let testActive = false;
     let voiceChatActive = false;
     let voiceTurnActive = false;
@@ -448,6 +494,8 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     let dialToneTimer = null;
     let callToneSession = false;
     let callToneConnected = false;
+    let renderedTranscriptSignature = null;
+    let lastAudioEndId = null;
     const outputLabels = { visor_only: '仅眼镜', mac_only: '仅电脑', mac_and_visor: '电脑 + 眼镜' };
     const inputLabels = { visor: '眼镜麦克风', mac: '电脑麦克风' };
     const transportLabels = { none: '未开始采集', visor: '眼镜通道', management_page: '8787 网页通道', chromium_native: 'Chromium 原生通道' };
@@ -476,6 +524,40 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
       gain.connect(context.destination);
       oscillator.start(start);
       oscillator.stop(start + duration + .03);
+    };
+    const playRogerSound = () => {
+      if (!toneContext) return;
+      const context = toneContext;
+      const length = Math.floor(context.sampleRate * .18);
+      const buffer = context.createBuffer(1, length, context.sampleRate);
+      const channel = buffer.getChannelData(0);
+      for (let index = 0; index < channel.length; index += 1) {
+        const envelope = Math.max(0, 1 - index / channel.length);
+        channel[index] = (Math.random() * 2 - 1) * envelope;
+      }
+      const source = context.createBufferSource();
+      const filter = context.createBiquadFilter();
+      const gain = context.createGain();
+      const start = context.currentTime;
+      source.buffer = buffer;
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(2300, start);
+      filter.Q.setValueAtTime(.8, start);
+      gain.gain.setValueAtTime(.0001, start);
+      gain.gain.exponentialRampToValueAtTime(.06, start + .012);
+      gain.gain.exponentialRampToValueAtTime(.0001, start + .17);
+      source.connect(filter);
+      filter.connect(gain);
+      gain.connect(context.destination);
+      source.start(start);
+      source.stop(start + .19);
+      beep(1480, .075, .026);
+    };
+    const syncRogerSound = (events) => {
+      const latestAudioEnd = (Array.isArray(events) ? events : []).slice().reverse().find((event) => event && event.type === 'audio_end');
+      if (!latestAudioEnd || latestAudioEnd.id === lastAudioEndId) return;
+      lastAudioEndId = latestAudioEnd.id;
+      playRogerSound();
     };
     const stopDialTone = () => {
       if (dialToneTimer !== null) {
@@ -510,37 +592,43 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
         finishCallTone(true);
       }
     };
+    const setStatusLight = (element, textElement, text, state) => {
+      element.dataset.state = state;
+      textElement.textContent = text;
+    };
     const renderVoiceEvents = (events) => {
-      const items = Array.isArray(events) ? events.slice(-40) : [];
+      const items = (Array.isArray(events) ? events : [])
+        .filter((event) => event && event.type === 'caption' && (event.role === 'user' || event.role === 'assistant'))
+        .slice(-40);
+      const signature = items.map((event) => String(event.id) + ':' + event.role + ':' + (event.text || '')).join('|');
+      if (signature === renderedTranscriptSignature) return;
+      const shouldFollow = voiceEvents.scrollHeight - voiceEvents.scrollTop - voiceEvents.clientHeight < 40;
+      const previousScrollTop = voiceEvents.scrollTop;
+      renderedTranscriptSignature = signature;
       voiceEvents.replaceChildren();
       if (!items.length) {
-        voiceEventStatus.textContent = '等待服务器返回';
+        voiceEventStatus.textContent = '暂无对话内容';
         const empty = document.createElement('div');
         empty.className = 'hint';
-        empty.textContent = '发送 hi there 或开始音频测试后，服务器识别文本和原生音频状态会显示在这里。';
+        empty.textContent = '接通后开始说话，对话内容会按轮次出现在这里。';
         voiceEvents.append(empty);
         return;
       }
       for (const event of items) {
         const row = document.createElement('div');
-        const role = event.role === 'user' ? 'user' : event.role === 'assistant' ? 'assistant' : event.type;
+        const role = event.role === 'user' ? 'user' : 'assistant';
         row.className = 'voice-event ' + role;
         const label = document.createElement('span');
         label.className = 'voice-event-label';
-        label.textContent = event.type === 'caption'
-          ? (event.role === 'user' ? '我说 / 服务器识别' : '服务器回复文本')
-          : event.type === 'audio_start'
-            ? '服务器已返回原生音频'
-            : event.type === 'audio_end'
-              ? '原生音频结束'
-              : 'Voice Chat 错误';
+        label.textContent = event.role === 'user' ? '我' : 'Code X';
         const body = document.createElement('span');
-        body.textContent = event.text || (event.type === 'audio_start' ? '正在通过 Chromium WebRTC 播放' : event.type === 'audio_end' ? '播放完成' : '未提供附加信息');
+        body.textContent = event.text || '';
         row.append(label, body);
         voiceEvents.append(row);
       }
-      voiceEventStatus.textContent = items.length + ' 条实时事件';
-      voiceEvents.scrollTop = voiceEvents.scrollHeight;
+      voiceEventStatus.textContent = items.length + ' 条对话内容';
+      if (shouldFollow) voiceEvents.scrollTop = voiceEvents.scrollHeight;
+      else voiceEvents.scrollTop = previousScrollTop;
     };
     const floatToPcm16 = (samples, sampleRate) => {
       const outputLength = Math.max(1, Math.floor(samples.length * 24000 / sampleRate));
@@ -612,9 +700,8 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
       const output = value.output || {};
       voiceChatActive = value.voiceChatActive === true;
       const phase = value.voiceChatPhase || (voiceChatActive ? 'connected' : 'stopped');
-      const phaseLabels = { starting: '正在启动 Voice Chat...', connected: 'Voice Chat 已连接，可以开始测试', stopping: '正在挂断 Voice Chat...', stopped: 'Voice Chat 已挂断', error: 'Voice Chat 失败' + (value.voiceChatError ? '：' + value.voiceChatError : '') };
+      const phaseLabels = { starting: '拨号中', connected: '已接通', stopping: '挂断中', stopped: '未接通', error: '通话错误' };
       voiceChatStatus.textContent = phaseLabels[phase] || phase;
-      voiceChatButton.textContent = voiceChatActive ? '挂断 Voice Chat' : '启动 Voice Chat';
       voiceChatButton.disabled = phase === 'starting' || phase === 'stopping';
       inputFill.style.height = meterWidth(input) + '%';
       outputFill.style.height = meterWidth(output) + '%';
@@ -628,24 +715,32 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
         : value.testActive
           ? (inputFrames > 0 ? '已收到输入帧，等待有效声音' : (inputControl.value === 'visor' ? '未收到眼镜音频，请使用眼镜 PTT' : '未收到电脑麦克风'))
           : (inputFrames > 0 ? '测试已停止，已收到 ' + inputFrames + ' 帧' : '未采集');
-      outputStatus.textContent = output.active ? '已收到返回' : '未收到返回';
       renderVoiceEvents(value.voiceEvents);
       testActive = value.testActive === true;
       voiceTurnActive = value.voiceTurnActive === true;
       const connected = voiceChatActive && phase === 'connected';
+      const callState = phase === 'connected' ? 'on' : phase === 'starting' || phase === 'stopping' ? 'busy' : phase === 'error' ? 'error' : 'off';
+      setStatusLight(callLight, callLightText, phase === 'connected' ? '已接通' : phase === 'starting' ? '拨号中' : phase === 'stopping' ? '挂断中' : phase === 'error' ? '通话错误' : '未接通', callState);
+      setStatusLight(inputLight, inputLightText, input.active ? '有声音' : testActive ? '采集中' : '输入待机', input.active ? 'on' : testActive ? 'busy' : 'off');
+      setStatusLight(outputLight, outputLightText, output.active ? '播放中' : voiceTurnActive ? '等待回复' : '播放待机', output.active ? 'on' : voiceTurnActive ? 'busy' : 'off');
+      inputStatus.textContent = input.active ? '有声音' : testActive ? '采集中' : '输入待机';
+      outputStatus.textContent = output.active ? '播放中' : voiceTurnActive ? '等待回复' : '播放待机';
+      syncRogerSound(value.voiceEvents);
       callOrb.dataset.phase = phase;
       linkReadout.textContent = phase === 'connected' ? '已接通' : phase === 'starting' ? '拨号中' : phase === 'stopping' ? '挂断中' : '未接通';
       syncCallTone(phase);
-      voiceChatButton.textContent = connected ? '挂断电话' : phase === 'starting' ? '拨号中...' : '拨打电话';
+      voiceChatButton.dataset.active = String(connected);
+      voiceChatButton.setAttribute('aria-label', connected ? '挂断电话' : '拨打电话');
+      voiceChatButtonLabel.textContent = connected ? '挂断电话' : phase === 'starting' ? '拨号中...' : '拨打电话';
       inputControl.disabled = !connected;
       outputControl.disabled = !connected;
       sampleButton.disabled = !connected || testActive;
-      sampleButton.textContent = voiceTurnActive
+      sampleButtonLabel.textContent = voiceTurnActive
         ? (pendingSample ? 'hi there 已排队' : '等待上一轮完成后发送 hi there')
-        : '发送测试 hi there';
+        : '播放探针';
       testButton.disabled = !connected || (!testActive && voiceTurnActive);
       testButton.dataset.active = String(testActive);
-      testButton.textContent = testActive ? '结束并发送' : '开始说话';
+      testButtonLabel.textContent = testActive ? '结束并发送' : '开始说话';
       controlHint.textContent = connected
         ? '通话已接通。可以播放 hi there 探针，或使用 Chrome 麦克风开始一轮对话。'
         : phase === 'starting'
@@ -725,7 +820,7 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
       }
       if (voiceTurnActive) {
         pendingSample = true;
-        sampleButton.textContent = 'hi there 已排队';
+        sampleButtonLabel.textContent = 'hi there 已排队';
         showAction('上一轮音频仍在等待服务器返回；hi there 已排队，将在这一轮结束后自动发送');
         return;
       }
