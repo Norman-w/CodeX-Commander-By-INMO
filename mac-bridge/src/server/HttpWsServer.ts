@@ -9,7 +9,7 @@ import WebSocket, { WebSocketServer, type RawData } from "ws";
 import { ClientControlMessageSchema } from "@codex-commander/protocol";
 
 import type { CommanderBridge } from "../bridge/CommanderBridge.js";
-import type { BridgeConfig } from "../config.js";
+import type { BridgeConfig, LocalAudioOutput } from "../config.js";
 import type { Logger } from "../log.js";
 
 export class HttpWsServer {
@@ -110,15 +110,20 @@ export class HttpWsServer {
       if (request.method === "GET" && url.pathname === "/api/settings") {
         return json(response, 200, {
           localAudioOutput: this.bridge.getLocalAudioOutput(),
-          default: "visor_only"
+          default: "visor_only",
+          options: ["visor_only", "mac_only", "mac_and_visor"]
         });
       }
       if (request.method === "PUT" && url.pathname === "/api/settings") {
         const payload = await readJson(request);
-        if (!isRecord(payload) || typeof payload.localAudioOutput !== "boolean") {
-          return json(response, 400, { error: "localAudioOutput must be boolean" });
+        const requested = isRecord(payload) ? payload.localAudioOutput : undefined;
+        const output = typeof requested === "boolean"
+          ? (requested ? "mac_and_visor" : "visor_only")
+          : requested;
+        if (!isLocalAudioOutput(output)) {
+          return json(response, 400, { error: "localAudioOutput must be visor_only, mac_only, or mac_and_visor" });
         }
-        this.bridge.setLocalAudioOutput(payload.localAudioOutput);
+        this.bridge.setLocalAudioOutput(output);
         return json(response, 200, { ok: true, localAudioOutput: this.bridge.getLocalAudioOutput() });
       }
       return json(response, 405, { error: "method not allowed" });
@@ -231,10 +236,14 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
 <body>
   <main>
     <h1>CodeX Commander Bridge</h1>
-    <p>macOS 本机管理页。眼镜仍会收到原生音频；这里仅控制 Mac 是否同时监听。</p>
+    <p>macOS 本机管理页。选择服务器返回的原生音频播放到眼镜、Mac，或两者同时播放。</p>
     <section class="card">
-      <div><div class="label">Mac 本机播放</div><div class="hint">关闭后：仅眼镜播放，避免回声</div></div>
-      <input id="localAudio" type="checkbox" aria-label="Mac 本机播放">
+      <div><div class="label">回复音频输出</div><div class="hint">仅电脑模式不会向眼镜发送下行音频</div></div>
+      <select id="localAudio" aria-label="回复音频输出">
+        <option value="visor_only">仅眼镜</option>
+        <option value="mac_only">仅电脑</option>
+        <option value="mac_and_visor">电脑 + 眼镜</option>
+      </select>
     </section>
     <div id="status">正在读取 Bridge 状态…</div>
     <p class="hint">默认值：<code>visor_only</code>。管理页只允许从本机访问。</p>
@@ -242,24 +251,29 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
   <script>
     const control = document.querySelector('#localAudio');
     const status = document.querySelector('#status');
+    const labels = { visor_only: '仅眼镜播放已开启', mac_only: '仅电脑播放已开启', mac_and_visor: '电脑 + 眼镜同时播放已开启' };
+    const normalize = (value) => typeof value === 'boolean' ? (value ? 'mac_and_visor' : 'visor_only') : value;
+    const updateStatus = (value) => { control.value = normalize(value); status.textContent = labels[control.value] || '音频输出模式未知'; };
     async function load() {
       const response = await fetch('/api/settings');
       const value = await response.json();
-      control.checked = value.localAudioOutput === true;
-      status.textContent = control.checked ? 'Mac 本机播放已开启' : '仅眼镜播放已开启';
+      updateStatus(value.localAudioOutput);
     }
     control.addEventListener('change', async () => {
       control.disabled = true;
-      const response = await fetch('/api/settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ localAudioOutput: control.checked }) });
+      const response = await fetch('/api/settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ localAudioOutput: control.value }) });
       const value = await response.json();
       control.disabled = false;
-      control.checked = value.localAudioOutput === true;
-      status.textContent = control.checked ? 'Mac 本机播放已开启' : '仅眼镜播放已开启';
+      updateStatus(value.localAudioOutput);
     });
     load().catch(() => { status.textContent = '无法读取 Bridge 状态'; });
   </script>
 </body>
 </html>`;
+
+function isLocalAudioOutput(value: unknown): value is LocalAudioOutput {
+  return value === "visor_only" || value === "mac_only" || value === "mac_and_visor";
+}
 
 function toBuffer(data: RawData): Buffer {
   if (Buffer.isBuffer(data)) return data;

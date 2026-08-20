@@ -4,6 +4,7 @@ import { EventEmitter } from "node:events";
 import { AUDIO_CHANNELS, AUDIO_SAMPLE_RATE } from "@codex-commander/protocol";
 
 import type { CodexNotification } from "../codex/CodexAppServerClient.js";
+import type { LocalAudioOutput } from "../config.js";
 import type { Logger } from "../log.js";
 import { sanitizeForVisor } from "../privacy/VisorText.js";
 import { CaptionLog, type CaptionRole } from "./CaptionLog.js";
@@ -58,7 +59,7 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
   constructor(
     private readonly host: CodexRealtimeHost,
     private readonly logger: Logger,
-    localAudioOutput = false
+    localAudioOutput: LocalAudioOutput = "visor_only"
   ) {
     super();
     this.orchestrator = new RealtimeSessionOrchestrator({
@@ -82,8 +83,8 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
     return true;
   }
 
-  setLocalAudioOutput(enabled: boolean): void {
-    this.chromiumSession.setLocalAudioOutput(enabled);
+  setLocalAudioOutput(output: LocalAudioOutput): void {
+    this.chromiumSession.setLocalAudioOutput(output);
   }
 
   async probeRealtime(): Promise<void> {

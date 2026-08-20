@@ -1,5 +1,7 @@
 //#region 导入/依赖
 import { AUDIO_SAMPLE_RATE } from "@codex-commander/protocol";
+
+import type { LocalAudioOutput } from "../config.js";
 //#endregion
 
 //#region 模型/类型
@@ -11,7 +13,7 @@ export type CommanderVoice = {
   endInput(): Promise<void>;
   abortInput(): void;
   speakSummary(summary: string): Promise<void>;
-  setLocalAudioOutput?(enabled: boolean): void;
+  setLocalAudioOutput?(output: LocalAudioOutput): void;
   close(): void;
   on(event: "audio", listener: (audio: Buffer) => void): unknown;
   on(event: "audioEnd", listener: (transcript: string) => void): unknown;

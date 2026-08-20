@@ -5,7 +5,7 @@ import type {
 } from "@codex-commander/protocol";
 import { CLIENT_AUDIO_FRAME, decodeBinaryFrame, encodeBinaryFrame, SERVER_AUDIO_FRAME } from "@codex-commander/protocol";
 
-import type { BridgeConfig } from "../config.js";
+import type { BridgeConfig, LocalAudioOutput } from "../config.js";
 import { CodexController } from "../codex/CodexController.js";
 import type { Logger } from "../log.js";
 import { ImageService } from "../media/ImageService.js";
@@ -39,7 +39,7 @@ export class CommanderBridge {
   private readonly sessions = new Map<string, ClientSession>();
   private audioResponseActive = false;
   private ready = false;
-  private localAudioOutput: boolean;
+  private localAudioOutput: LocalAudioOutput;
 
   constructor(
     private readonly config: BridgeConfig,
@@ -71,6 +71,7 @@ export class CommanderBridge {
 
     this.voice.on("audio", (audio: Buffer) => {
       if ([...this.sessions.values()].some((session) => session.pttActive)) return;
+      if (this.localAudioOutput === "mac_only") return;
       if (!this.audioResponseActive) {
         this.audioResponseActive = true;
         this.broadcast(this.journal.create({
@@ -127,11 +128,16 @@ export class CommanderBridge {
   isReady(): boolean { return this.ready; }
   getPairingSnapshot(): PairingSnapshot { return this.pairing.snapshot(); }
   validateMediaToken(deviceId: string, token: string): boolean { return this.pairing.isTokenValid(deviceId, token); }
-  getLocalAudioOutput(): boolean { return this.localAudioOutput; }
-  setLocalAudioOutput(enabled: boolean): void {
-    this.localAudioOutput = enabled;
-    this.voice.setLocalAudioOutput?.(enabled);
-    this.logger.info("Mac local audio output updated", { enabled });
+  getLocalAudioOutput(): LocalAudioOutput { return this.localAudioOutput; }
+  setLocalAudioOutput(output: LocalAudioOutput): void {
+    const previous = this.localAudioOutput;
+    this.localAudioOutput = output;
+    this.voice.setLocalAudioOutput?.(output);
+    if (output === "mac_only" && previous !== output && this.audioResponseActive) {
+      this.audioResponseActive = false;
+      this.broadcast(this.journal.create({ type: "assistant_audio_end" }, false));
+    }
+    this.logger.info("Audio output mode updated", { output });
   }
 
   async resetPairing(): Promise<PairingSnapshot> {

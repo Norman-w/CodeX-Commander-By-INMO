@@ -8,6 +8,8 @@ import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 
+import type { LocalAudioOutput } from "../config.js";
+
 const AUDIO_SAMPLE_RATE = 24_000;
 const START_TIMEOUT_MS = 45_000;
 const PAGE_SOURCE = String.raw`<!doctype html>
@@ -53,8 +55,11 @@ const PAGE_SOURCE = String.raw`<!doctype html>
           send({ type: 'answer-set' });
         }
         if (message.type === 'local-output') {
-          const gain = message.enabled === true ? 1 : 0;
-          if (inputMonitorGain) inputMonitorGain.gain.value = gain;
+          const mode = typeof message.mode === 'string'
+            ? message.mode
+            : (message.enabled === true ? 'mac_and_visor' : 'visor_only');
+          const gain = mode === 'mac_only' || mode === 'mac_and_visor' ? 1 : 0;
+          if (inputMonitorGain) inputMonitorGain.gain.value = 0;
           if (remoteMonitorGain) remoteMonitorGain.gain.value = gain;
         }
         if (message.type === 'close') {
@@ -199,13 +204,13 @@ export class ChromiumRealtimeSession extends EventEmitter {
   public constructor(
     private readonly host: ChromiumRealtimeHost,
     private readonly logger: any,
-    localAudioOutput = false
+    localAudioOutput: LocalAudioOutput = "visor_only"
   ) {
     super();
     this.localAudioOutput = localAudioOutput;
   }
 
-  private localAudioOutput = false;
+  private localAudioOutput: LocalAudioOutput = "visor_only";
 
   public async start(threadId: string): Promise<void> {
     await this.close();
@@ -244,9 +249,9 @@ export class ChromiumRealtimeSession extends EventEmitter {
     this.socket.send(audio);
   }
 
-  public setLocalAudioOutput(enabled: boolean): void {
-    this.localAudioOutput = enabled;
-    this.sendJson({ type: 'local-output', enabled });
+  public setLocalAudioOutput(output: LocalAudioOutput): void {
+    this.localAudioOutput = output;
+    this.sendJson({ type: 'local-output', mode: output });
   }
 
   public handleNotification(notification: unknown): void {
@@ -375,7 +380,7 @@ export class ChromiumRealtimeSession extends EventEmitter {
       const sdp = this.pendingSdp;
       this.sendJson({ type: 'answer', sdp });
     }
-    this.sendJson({ type: 'local-output', enabled: this.localAudioOutput });
+    this.sendJson({ type: 'local-output', mode: this.localAudioOutput });
   }
 
   private onPageMessage(text: string): void {
