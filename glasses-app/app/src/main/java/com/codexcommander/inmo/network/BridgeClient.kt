@@ -2,6 +2,7 @@ package com.codexcommander.inmo.network
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import com.codexcommander.inmo.BuildConfig
 import com.codexcommander.inmo.protocol.CommanderProtocol
 import com.codexcommander.inmo.protocol.ServerMessage
 import kotlinx.coroutines.Dispatchers
@@ -43,7 +44,9 @@ class BridgeClient(
     private var intentionallyClosed = false
 
     fun connect(endpoint: String) {
-        require(endpoint.startsWith("wss://")) { "Bridge 必须使用 wss://" }
+        require(isAllowedBridgeEndpoint(endpoint)) {
+            if (BuildConfig.DEBUG) "Bridge 必须使用 ws:// 或 wss://" else "Bridge 必须使用 wss://"
+        }
         disconnect()
         this.endpoint = endpoint
         intentionallyClosed = false
@@ -65,7 +68,7 @@ class BridgeClient(
     ) == true
 
     suspend fun downloadImage(path: String, deviceId: String, token: String): Bitmap = withContext(Dispatchers.IO) {
-        val httpEndpoint = "https://${endpoint.removePrefix("wss://")}"
+        val httpEndpoint = httpEndpointFor(endpoint)
         val base = httpEndpoint.toHttpUrl().newBuilder().encodedPath("/").query(null).build()
         val imageUrl = base.resolve(path) ?: throw IOException("无效图片地址")
         val request = Request.Builder()
@@ -127,6 +130,15 @@ class BridgeClient(
 
     private companion object {
         const val MAX_IMAGE_BYTES = 5 * 1024 * 1024
+
+        fun isAllowedBridgeEndpoint(endpoint: String): Boolean =
+            endpoint.startsWith("wss://") || (BuildConfig.DEBUG && endpoint.startsWith("ws://"))
+
+        fun httpEndpointFor(endpoint: String): String = when {
+            endpoint.startsWith("wss://") -> "https://${endpoint.removePrefix("wss://")}"
+            BuildConfig.DEBUG && endpoint.startsWith("ws://") -> "http://${endpoint.removePrefix("ws://")}"
+            else -> error("unsupported bridge endpoint")
+        }
 
         fun readBounded(body: ResponseBody, limit: Int): ByteArray {
             body.source().use { source ->

@@ -39,7 +39,8 @@ class CommanderHudView @JvmOverloads constructor(
             !swiping &&
             (state.pttMode == PttMode.HOLD || state.completionAwaitingReport) &&
             state.pendingApproval == null &&
-            !state.imageVisible
+            !state.imageVisible &&
+            !state.threadPickerOpen
         ) {
             if (state.completionAwaitingReport) suppressTapConfirmation = true
             controller?.onPttDown()
@@ -85,10 +86,15 @@ class CommanderHudView @JvmOverloads constructor(
         ): Boolean {
             val start = event1 ?: return false
             val dx = event2.x - start.x
-            if (abs(dx) < SWIPE_DISTANCE || abs(dx) < abs(event2.y - start.y)) return false
+            val dy = event2.y - start.y
+            if (abs(dx) < SWIPE_DISTANCE && abs(dy) < SWIPE_DISTANCE) return false
             swiping = true
             handler.removeCallbacks(startHold)
-            controller?.onHorizontalSwipe(if (dx < 0) 1 else -1)
+            if (abs(dy) > abs(dx)) {
+                controller?.onVerticalSwipe(if (dy > 0) 1 else -1)
+            } else {
+                controller?.onHorizontalSwipe(if (dx < 0) 1 else -1)
+            }
             performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
             return true
         }
@@ -262,6 +268,10 @@ class CommanderHudView @JvmOverloads constructor(
     }
 
     private fun drawTask(canvas: Canvas, left: Float, right: Float, top: Float, bottom: Float) {
+        if (state.threadPickerOpen) {
+            drawThreadPicker(canvas, left, right, top, bottom)
+            return
+        }
         val title = state.selectedThread?.title?.let(HudText::plain)?.ifBlank { null }
             ?: if (state.threads.isEmpty()) "眼镜遥控 · 新任务" else "Codex Commander"
         paint.color = COLOR_WHITE
@@ -280,23 +290,77 @@ class CommanderHudView @JvmOverloads constructor(
         }
         drawEllipsized(canvas, phase, left, top + sp(34), right - left)
 
-        paint.color = COLOR_WHITE
-        paint.textSize = sp(20)
-        val messageTop = top + sp(70)
-        drawWrapped(canvas, HudText.plain(state.taskMessage), left, messageTop, right - left, sp(28), maxLines = 6)
+        var bodyTop = top + sp(70)
+        if (state.recentContext.isNotEmpty()) {
+            paint.color = COLOR_MUTED
+            paint.textSize = sp(16)
+            canvas.drawText("上下文 · 实时", left, bodyTop, paint)
+            bodyTop += sp(22)
+            state.recentContext.takeLast(3).forEach { contextLine ->
+                paint.color = when (contextLine.role) {
+                    "user" -> COLOR_ACCENT
+                    "assistant" -> COLOR_WHITE
+                    "status" -> COLOR_WARNING
+                    else -> COLOR_MUTED
+                }
+                paint.textSize = sp(18)
+                drawEllipsized(canvas, HudText.plain(contextLine.text), left, bodyTop, right - left)
+                bodyTop += sp(22)
+            }
+        }
+
+        val body = HudText.plain(state.taskMessage)
+        val lastContext = state.recentContext.lastOrNull()?.text?.let(HudText::plain)
+        if (body.isNotEmpty() && !HudText.duplicatesPhase(state.taskPhase, body) && body != lastContext) {
+            paint.color = COLOR_WHITE
+            paint.textSize = sp(20)
+            drawWrapped(canvas, body, left, bodyTop, right - left, sp(28), maxLines = 3)
+        }
 
         val hint = when {
             state.error != null -> state.error!!
             state.completionAwaitingReport -> "轻触播放汇报 · 按住可继续说话"
             state.playing -> "正在播报 · 按住可打断并说话"
             state.activeTurnId != null -> "按住可补充指令 · 完成后才能切换任务"
-            state.threads.size > 1 -> "左右滑动切换任务 · 按住说话"
+            state.threads.size > 1 -> "下滑选择会话 · 左右切换 · 按住说话"
             state.pttMode == PttMode.TOGGLE -> "轻触开始说话 · 再次轻触提交"
             else -> "按住说话 · 松开提交 · 空闲时麦克风关闭"
         }
         paint.textSize = sp(18)
         paint.color = if (state.error != null) COLOR_DANGER else COLOR_MUTED
         drawEllipsized(canvas, HudText.plain(hint), left, bottom, right - left)
+    }
+
+    private fun drawThreadPicker(canvas: Canvas, left: Float, right: Float, top: Float, bottom: Float) {
+        paint.color = COLOR_ACCENT
+        paint.textSize = sp(24)
+        paint.isFakeBoldText = true
+        canvas.drawText("选择 Voice Chat 会话", left, top, paint)
+        paint.isFakeBoldText = false
+
+        val selectedIndex = state.threads.indexOfFirst { it.id == state.selectedThreadId }.coerceAtLeast(0)
+        val first = (selectedIndex - 2).coerceIn(0, (state.threads.size - PICKER_ROWS).coerceAtLeast(0))
+        state.threads.drop(first).take(PICKER_ROWS).forEachIndexed { offset, thread ->
+            val selected = thread.id == state.selectedThreadId
+            val rowTop = top + sp(22) + offset * sp(54)
+            if (selected) {
+                paint.color = COLOR_PANEL
+                canvas.drawRoundRect(RectF(left - sp(8), rowTop - sp(24), right, rowTop + sp(18)), sp(8), sp(8), paint)
+            }
+            paint.color = if (selected) COLOR_ACCENT else COLOR_MUTED
+            paint.textSize = sp(18)
+            canvas.drawText(if (selected) ">" else "·", left, rowTop, paint)
+            paint.color = if (selected) COLOR_WHITE else COLOR_MUTED
+            paint.textSize = sp(19)
+            drawEllipsized(canvas, HudText.plain(thread.title), left + sp(18), rowTop, right - left - sp(18))
+            paint.color = if (selected) COLOR_ACCENT else COLOR_MUTED
+            paint.textSize = sp(14)
+            drawEllipsized(canvas, HudText.threadStatusLabel(thread.status), left + sp(18), rowTop + sp(18), right - left - sp(18))
+        }
+
+        paint.color = COLOR_MUTED
+        paint.textSize = sp(17)
+        drawEllipsized(canvas, "下滑打开 · 上滑关闭 · 左右切换 · 轻触完成", left, bottom, right - left)
     }
 
     private fun drawApproval(canvas: Canvas, left: Float, right: Float, top: Float, bottom: Float) {
@@ -438,8 +502,11 @@ class CommanderHudView @JvmOverloads constructor(
         append("Codex Commander。")
         append(HudText.connectionLabel(value.connection))
         append('。')
-        value.pendingApproval?.let { append("需要审批：${it.title}。当前选择${value.approvalChoice.label}。") }
-            ?: append(HudText.plain(value.error ?: value.taskMessage))
+        when {
+            value.threadPickerOpen -> append("正在选择 Voice Chat 会话。")
+            value.pendingApproval != null -> append("需要审批：${value.pendingApproval.title}。当前选择${value.approvalChoice.label}。")
+            else -> append(HudText.plain(value.error ?: value.taskMessage))
+        }
     }
 
     private fun sp(value: Int): Float = android.util.TypedValue.applyDimension(
@@ -452,6 +519,8 @@ class CommanderHudView @JvmOverloads constructor(
         const val HOLD_DELAY_MS = 180L
         const val SWIPE_DISTANCE = 80f
         const val TOUCH_SLOP = 28f
+        const val PICKER_ROWS = 5
+        val COLOR_PANEL = Color.rgb(24, 43, 55)
         val COLOR_WHITE = Color.rgb(247, 251, 255)
         val COLOR_ACCENT = Color.rgb(56, 215, 255)
         val COLOR_MUTED = Color.rgb(168, 179, 189)

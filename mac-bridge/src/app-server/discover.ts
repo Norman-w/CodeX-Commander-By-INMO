@@ -121,7 +121,7 @@ export async function resolveAppServerLaunch(config: {
 }): Promise<AppServerLaunchConfig> {
   const codexBin = resolveCodexBin(config.codexBin);
   if (config.mode === "stdio") {
-    return { mode: "stdio", codexBin, args: ["app-server", "--stdio"] };
+    return { mode: "stdio", codexBin, args: ["app-server", "--stdio", "--enable", "realtime_conversation"] };
   }
 
   const report = await probeAppServerAttach({ codexBin, socketPath: config.socketPath });

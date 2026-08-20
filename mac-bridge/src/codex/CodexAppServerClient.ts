@@ -234,15 +234,21 @@ export class CodexAppServerClient extends EventEmitter {
 //#region 方法/工具
 function sanitizedChildEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const result = { ...env };
+  const passApiKey = env.COMMANDER_APP_SERVER_MODE === "stdio" && isUsableApiKey(env.OPENAI_API_KEY);
   for (const name of [
-    "OPENAI_API_KEY",
     "COMMANDER_PAIRING_FILE",
     "COMMANDER_ORIGIN_ALLOWLIST",
     "COMMANDER_TAILSCALE_BIN"
   ]) delete result[name];
+  if (!passApiKey) delete result.OPENAI_API_KEY;
   for (const name of Object.keys(result)) {
     if (name.startsWith("COMMANDER_") && name !== "COMMANDER_CWD") delete result[name];
   }
   return result;
+}
+
+function isUsableApiKey(value: string | undefined): boolean {
+  const normalized = value?.trim();
+  return Boolean(normalized && normalized !== "your_openai_api_key" && normalized !== "sk-your-key-here");
 }
 //#endregion

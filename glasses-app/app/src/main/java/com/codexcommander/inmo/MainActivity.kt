@@ -58,14 +58,19 @@ class MainActivity : Activity() {
         window.statusBarColor = Color.BLACK
         window.navigationBarColor = Color.BLACK
         window.setDecorFitsSystemWindows(false)
-        window.insetsController?.hide(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars())
-        window.insetsController?.systemBarsBehavior = android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
 
         preferences = CommanderPreferences(this)
         controller = CommanderController(this)
         hud = CommanderHudView(this).also {
             it.bind(controller)
             setContentView(it)
+        }
+        hud.post {
+            runCatching {
+                window.insetsController?.hide(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars())
+                window.insetsController?.systemBarsBehavior =
+                    android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            }
         }
         uiScope.launch {
             controller.state.collectLatest { state ->

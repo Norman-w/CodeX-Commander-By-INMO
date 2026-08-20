@@ -5,8 +5,8 @@ project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 endpoint=${1:-}
 pairing_code=${2:-}
 
-printf '%s' "$endpoint" | grep -Eq '^wss://[A-Za-z0-9.-]+(:[0-9]+)?/v1/visor$' || {
-  echo "AIR3 自动配置需要规范的 wss://.../v1/visor 地址" >&2
+printf '%s' "$endpoint" | grep -Eq '^wss?://[A-Za-z0-9.-]+(:[0-9]+)?/v1/visor$' || {
+  echo "AIR3 自动配置需要规范的 wss:// 或本机调试 ws:// .../v1/visor 地址" >&2
   exit 1
 }
 printf '%s' "$pairing_code" | grep -Eq '^[0-9]{6}$' || {

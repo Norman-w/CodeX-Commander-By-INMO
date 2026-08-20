@@ -47,6 +47,7 @@ export class CodexController {
   private latestFinal = "";
   private readonly summaries = new Map<string, string>();
   private pendingApproval?: ApprovalPending;
+  private readonly notificationSubscribers = new Set<(notification: CodexNotification) => void>();
   private progressBuffer = "";
   private progressThreadId = "";
   private progressTurnId: string | null = null;
@@ -76,7 +77,10 @@ export class CodexController {
     });
     this.logger.info("Connecting to Codex app-server", { mode: launch.mode });
     const client = new CodexAppServerClient(launch, this.logger);
-    client.on("notification", (notification: CodexNotification) => this.handleNotification(notification));
+    client.on("notification", (notification: CodexNotification) => {
+      this.handleNotification(notification);
+      for (const listener of this.notificationSubscribers) listener(notification);
+    });
     client.on("request", (request: CodexServerRequest) => this.handleServerRequest(request));
     return client;
   }
@@ -154,6 +158,13 @@ export class CodexController {
   }
 
   async startVoiceThread(): Promise<string> {
+    const existing = (await this.listThreadRecords())
+      .filter((thread) => isCommanderThreadSource(thread.threadSource))
+      .sort((left, right) => Number(left.status.type === "active") - Number(right.status.type === "active"))[0];
+    if (existing) {
+      await this.resumeThread(existing.id);
+      return existing.id;
+    }
     this.selectedThreadId = null;
     this.selectedThreadSummary = null;
     this.activeTurnId = null;
@@ -165,16 +176,17 @@ export class CodexController {
   }
 
   subscribeNotifications(listener: (notification: CodexNotification) => void): () => void {
-    const wrapped = (notification: CodexNotification) => listener(notification);
-    this.client.on("notification", wrapped);
-    return () => this.client.off("notification", wrapped);
+    this.notificationSubscribers.add(listener);
+    return () => {
+      this.notificationSubscribers.delete(listener);
+    };
   }
 
   async listThreads(): Promise<ThreadSummary[]> {
     const records = await this.listThreadRecords();
-    const tasks = records
+    const tasks = dedupeThreadSummaries(records
       .filter((thread) => isCommanderThreadSource(thread.threadSource))
-      .map((thread) => toThreadSummary(thread, this.config.cwd));
+      .map((thread) => toThreadSummary(thread, this.config.cwd)), this.selectedThreadId);
     if (this.selectedThreadSummary && !tasks.some((thread) => thread.id === this.selectedThreadSummary?.id)) {
       tasks.unshift(this.selectedThreadSummary);
     }
@@ -183,7 +195,7 @@ export class CodexController {
 
   private async listThreadRecords(): Promise<Thread[]> {
     const params: ThreadListParams = {
-      limit: 50,
+      limit: 100,
       sortKey: "updated_at",
       sortDirection: "desc",
       archived: false,
@@ -457,6 +469,20 @@ function toThreadSummary(thread: Thread, sensitiveRoot?: string): ThreadSummary 
     status,
     updatedAt: thread.updatedAt
   };
+}
+
+function dedupeThreadSummaries(tasks: ThreadSummary[], selectedThreadId: string | null): ThreadSummary[] {
+  const unique = new Map<string, ThreadSummary>();
+  for (const task of tasks) {
+    const key = `${normalizeThreadText(task.title)}\u0000${normalizeThreadText(task.preview)}`;
+    const existing = unique.get(key);
+    if (!existing || task.id === selectedThreadId) unique.set(key, task);
+  }
+  return [...unique.values()];
+}
+
+function normalizeThreadText(value: string): string {
+  return value.replace(/\s+/g, " ").trim().toLocaleLowerCase();
 }
 
 function sandboxPolicy(config: BridgeConfig): import("../generated/codex/v2/SandboxPolicy.js").SandboxPolicy {

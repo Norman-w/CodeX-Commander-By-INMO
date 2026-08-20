@@ -13,6 +13,11 @@ enum class ApprovalChoice(val wireValue: String, val label: String) {
     CANCEL("cancel", "取消请求"),
 }
 
+data class HudContextLine(
+    val role: String,
+    val text: String,
+)
+
 data class HudState(
     val connection: ConnectionState = ConnectionState.UNCONFIGURED,
     val pttMode: PttMode = PttMode.HOLD,
@@ -24,6 +29,8 @@ data class HudState(
     val selectedThreadId: String? = null,
     val activeTurnId: String? = null,
     val threads: List<ThreadSummary> = emptyList(),
+    val threadPickerOpen: Boolean = false,
+    val recentContext: List<HudContextLine> = emptyList(),
     val taskPhase: String = "idle",
     val taskMessage: String = "启动后按住眼镜腿说话",
     val latestSummary: String? = null,

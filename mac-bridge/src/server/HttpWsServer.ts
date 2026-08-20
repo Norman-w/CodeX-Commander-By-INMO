@@ -136,7 +136,7 @@ export class HttpWsServer {
 
   private originAllowed(request: IncomingMessage): boolean {
     const origin = request.headers.origin;
-    if (!origin) return true;
+    if (!origin || this.config.originAllowlist.size === 0) return true;
     return this.config.originAllowlist.has(origin);
   }
 }

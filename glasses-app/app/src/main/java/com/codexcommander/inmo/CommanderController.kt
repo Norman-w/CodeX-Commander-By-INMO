@@ -14,6 +14,7 @@ import com.codexcommander.inmo.input.PttAction
 import com.codexcommander.inmo.input.PttStateMachine
 import com.codexcommander.inmo.model.ApprovalChoice
 import com.codexcommander.inmo.model.ConnectionState
+import com.codexcommander.inmo.model.HudContextLine
 import com.codexcommander.inmo.model.HudState
 import com.codexcommander.inmo.network.BridgeClient
 import com.codexcommander.inmo.protocol.CommanderProtocol
@@ -33,6 +34,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.security.MessageDigest
+
+private const val MAX_CONTEXT_LINES = 6
 
 class CommanderController(context: Context) : BridgeClient.Listener {
     private val applicationContext = context.applicationContext
@@ -142,6 +145,7 @@ class CommanderController(context: Context) : BridgeClient.Listener {
     fun onSingleTap() {
         val current = mutableState.value
         when {
+            current.threadPickerOpen -> update { it.copy(threadPickerOpen = false, error = null) }
             current.pendingApproval != null -> Unit
             current.imageVisible -> update { it.copy(imageVisible = false, imageBitmap = null, imageError = null) }
             current.completionAwaitingReport -> requestReport()
@@ -196,6 +200,20 @@ class CommanderController(context: Context) : BridgeClient.Listener {
                 update { it.copy(error = "任务未切换，请等待连接恢复") }
             }
         }
+    }
+
+    fun onVerticalSwipe(direction: Int) {
+        val current = mutableState.value
+        if (current.pendingApproval != null || current.imageVisible || current.threads.isEmpty()) return
+        if (!current.threadPickerOpen) {
+            if (direction > 0) update { it.copy(threadPickerOpen = true, error = null) }
+            return
+        }
+        if (direction < 0) {
+            update { it.copy(threadPickerOpen = false, error = null) }
+            return
+        }
+        onHorizontalSwipe(1)
     }
 
     fun interrupt() {
@@ -262,6 +280,14 @@ class CommanderController(context: Context) : BridgeClient.Listener {
                         summaryFingerprint(summary) != preferences.reportedSummaryFingerprint(message.selectedThreadId)
                 }
                 val shouldNotify = unreportedSummary != null && unreportedSummary != current.latestSummary
+                val selectedPreview = message.threads
+                    .firstOrNull { thread -> thread.id == message.selectedThreadId }
+                    ?.preview
+                    ?.takeIf(String::isNotBlank)
+                val syncContext = buildList {
+                    selectedPreview?.let { add(HudContextLine("context", it)) }
+                    unreportedSummary?.let { add(HudContextLine("assistant", it)) }
+                }.takeLast(MAX_CONTEXT_LINES)
                 update {
                     val phase = when {
                         message.pendingApproval != null -> "waiting_approval"
@@ -274,6 +300,10 @@ class CommanderController(context: Context) : BridgeClient.Listener {
                         selectedThreadId = message.selectedThreadId,
                         activeTurnId = message.activeTurnId,
                         threads = message.threads,
+                        threadPickerOpen = if (message.selectedThreadId != current.selectedThreadId) false else it.threadPickerOpen,
+                        recentContext = if (syncContext.isNotEmpty()) syncContext
+                            else if (message.selectedThreadId != current.selectedThreadId) emptyList()
+                            else it.recentContext,
                         pendingApproval = message.pendingApproval,
                         latestSummary = message.latestSummary,
                         images = message.images,
@@ -306,6 +336,7 @@ class CommanderController(context: Context) : BridgeClient.Listener {
                         activeTurnId = if (message.final) null else message.turnId,
                         taskPhase = message.phase,
                         taskMessage = message.message,
+                        recentContext = appendContext(it.recentContext, HudContextLine("status", message.message)),
                         latestSummary = if (completed) message.message else it.latestSummary,
                         completionAwaitingReport = completed,
                         lastEventId = message.eventId,
@@ -350,6 +381,10 @@ class CommanderController(context: Context) : BridgeClient.Listener {
                 update {
                     it.copy(
                         taskMessage = HudText.caption(message.role, message.text),
+                        recentContext = appendContext(
+                            it.recentContext,
+                            HudContextLine(message.role, HudText.caption(message.role, message.text)),
+                        ),
                         lastEventId = message.eventId,
                     )
                 }
@@ -390,10 +425,13 @@ class CommanderController(context: Context) : BridgeClient.Listener {
                 val reportFailed = pendingReport != null
                 pendingReport = null
                 update {
+                    val leaveVoiceWait = it.taskPhase == "queued" || it.listening
                     it.copy(
                         connection = if (message.recoverable) it.connection else ConnectionState.ERROR,
                         setupRequired = message.code == "authentication_failed" || it.setupRequired,
                         listening = false,
+                        taskPhase = if (leaveVoiceWait) "idle" else it.taskPhase,
+                        taskMessage = if (leaveVoiceWait) "按住眼镜腿说出任务" else it.taskMessage,
                         completionAwaitingReport = reportFailed || it.completionAwaitingReport,
                         error = friendly,
                     )
@@ -529,7 +567,7 @@ class CommanderController(context: Context) : BridgeClient.Listener {
         val sent = bridge.sendControl(CommanderProtocol.pttEnd())
         ptt.forceStop()
         update {
-            if (sent) it.copy(listening = false, taskPhase = "queued", taskMessage = "正在处理语音…", error = null)
+            if (sent) it.copy(listening = false, taskPhase = "queued", error = null)
             else it.copy(listening = false, error = "语音未送达，请等待连接恢复后重试")
         }
     }
@@ -581,6 +619,12 @@ class CommanderController(context: Context) : BridgeClient.Listener {
 
     private fun update(transform: (HudState) -> HudState) {
         mutableState.value = transform(mutableState.value)
+    }
+
+    private fun appendContext(current: List<HudContextLine>, line: HudContextLine): List<HudContextLine> {
+        val text = HudText.plain(line.text)
+        if (text.isBlank()) return current
+        return (current + HudContextLine(line.role, text.take(1_200))).takeLast(MAX_CONTEXT_LINES)
     }
 
     private inline fun runOnMain(crossinline block: () -> Unit) {

@@ -18,8 +18,15 @@ class ConnectionEndpointTest {
     }
 
     @Test
-    fun rejectsCleartextCredentialsQueriesAndUnexpectedPaths() {
-        assertNull(ConnectionEndpoint.normalize("ws://bridge.example.test"))
+    fun normalizesDebugCleartextLanBridgePath() {
+        assertEquals(
+            "ws://192.168.7.94:8787/v1/visor",
+            ConnectionEndpoint.normalize(" ws://192.168.7.94:8787/ "),
+        )
+    }
+
+    @Test
+    fun rejectsCredentialsQueriesAndUnexpectedPaths() {
         assertNull(ConnectionEndpoint.normalize("wss://user@bridge.example.test"))
         assertNull(ConnectionEndpoint.normalize("wss://bridge.example.test/v1/other"))
         assertNull(ConnectionEndpoint.normalize("wss://bridge.example.test?v=1"))

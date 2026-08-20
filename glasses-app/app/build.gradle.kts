@@ -25,7 +25,7 @@ android {
         debug {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
-            manifestPlaceholders["cleartextTraffic"] = "false"
+            manifestPlaceholders["cleartextTraffic"] = "true"
         }
         release {
             isMinifyEnabled = true

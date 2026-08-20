@@ -38,6 +38,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
   const parsed = EnvSchema.parse(env);
   const cwd = resolve(parsed.COMMANDER_CWD);
   if (!existsSync(cwd)) throw new Error(`COMMANDER_CWD does not exist: ${cwd}`);
+  const apiKey = usableApiKey(parsed.OPENAI_API_KEY);
+  const useDirectRealtime = parsed.COMMANDER_VOICE === "openai"
+    || (parsed.COMMANDER_VOICE === "auto" && Boolean(apiKey));
 
   const explicitRoots = parsed.COMMANDER_MEDIA_ROOTS.split(",")
     .map((entry) => entry.trim())
@@ -51,14 +54,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     originAllowlist: new Set(parsed.COMMANDER_ORIGIN_ALLOWLIST.split(",").map((entry) => entry.trim()).filter(Boolean)),
     pairingFile: resolve(parsed.COMMANDER_PAIRING_FILE),
     voice: {
-      mode: parsed.COMMANDER_VOICE === "openai" ? "openai" as const : "codex-realtime" as const
+      mode: useDirectRealtime ? "openai" as const : "codex-realtime" as const
     },
     appServer: {
       mode: parsed.COMMANDER_APP_SERVER_MODE,
       socketPath: parsed.COMMANDER_APP_SERVER_SOCKET || undefined
     },
     realtime: {
-      apiKey: usableApiKey(parsed.OPENAI_API_KEY),
+      apiKey,
       model: parsed.COMMANDER_REALTIME_MODEL,
       voice: parsed.COMMANDER_REALTIME_VOICE,
       idleMs: parsed.COMMANDER_REALTIME_IDLE_MS

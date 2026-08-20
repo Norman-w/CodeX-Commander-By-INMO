@@ -62,27 +62,28 @@ describe("CodexRealtimeVoiceClient", () => {
     client.close();
   });
 
-  it("restarts session after thread/realtime/closed", async () => {
+  it("fails the open turn when Voice session access is denied", async () => {
     const listeners: Array<(notification: { method: string; params?: Record<string, unknown> }) => void> = [];
-    let starts = 0;
     const host: CodexRealtimeHost = {
       ensureSelectedThread: async () => "thread-1",
       startVoiceThread: async () => "thread-voice",
-      requestJsonRpc: async (method) => {
-        if (method === "thread/realtime/start") starts += 1;
-        return {} as never;
-      },
+      requestJsonRpc: async () => ({} as never),
       subscribeNotifications: (listener) => {
         listeners.push(listener);
         return () => undefined;
       }
     };
     const client = new CodexRealtimeVoiceClient(host, new Logger("error"));
+    const failed = new Promise<Error>((resolve) => client.on("error", resolve));
     await client.beginInput();
     client.appendInput(new Uint8Array(4_800).fill(1));
-    listeners[0]?.({ method: "thread/realtime/closed", params: { threadId: "thread-1" } });
-    await client.endInput();
-    expect(starts).toBeGreaterThanOrEqual(1);
+    listeners[0]?.({
+      method: "thread/realtime/error",
+      params: { message: "stream disconnected before completion: Voice session access denied." }
+    });
+    const error = await failed;
+    expect(error.message).toContain("Voice Chat");
+    await expect(client.endInput()).rejects.toMatchObject({ code: "ptt_not_active" });
     client.close();
   });
 
@@ -99,7 +100,10 @@ describe("CodexRealtimeVoiceClient", () => {
     };
     const client = new CodexRealtimeVoiceClient(host, new Logger("error"));
     await client.probeRealtime();
-    expect(requests.map((item) => item.method)).toContain("thread/realtime/start");
+    expect(requests.map((item) => item.method)).toEqual([
+      "thread/realtime/start",
+      "thread/realtime/stop"
+    ]);
     client.close();
   });
 });

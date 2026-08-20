@@ -39,6 +39,20 @@ object HudText {
         else -> "可以开始"
     }
 
+    fun threadStatusLabel(status: String): String = when (status) {
+        "working" -> "执行中"
+        "waiting_approval" -> "等待确认"
+        "completed", "idle" -> "可继续"
+        "failed" -> "任务失败"
+        else -> "未知状态"
+    }
+
+    fun duplicatesPhase(phase: String, message: String): Boolean {
+        val label = phaseLabel(phase)
+        val trimmed = message.trim().trimEnd('…', '.', '。')
+        return trimmed.isEmpty() || trimmed == label
+    }
+
     fun approvalResolution(resolution: String): String = when (resolution) {
         "accept" -> "已允许本次操作"
         "decline" -> "已拒绝操作"
@@ -64,7 +78,10 @@ object HudText {
             code == "realtime_not_configured" || normalized.contains("openai_api_key") ->
                 "Mac 尚未配置 OpenAI API Key"
             code == "realtime_unavailable" || code == "realtime_error" ->
-                "语音服务暂时不可用，请稍后再试"
+                if (normalized.contains("access denied") || raw.contains("Voice Chat"))
+                    "Codex 语音通道不可用。请关闭 ChatGPT 的 Voice Chat 后再说一次"
+                else
+                    "语音服务暂时不可用，请稍后再试"
             normalized.contains("permission") && normalized.contains("record") ->
                 "麦克风权限未开启，请在系统设置中允许录音"
             normalized.contains("unable to resolve host") || normalized.contains("failed to connect") ||
