@@ -266,6 +266,9 @@ export class CommanderBridge {
     }
     this.voiceChatPhase = "starting";
     this.voiceChatError = undefined;
+    this.voiceTurnActive = false;
+    this.audioResponseActive = false;
+    this.diagnosticInputActive = false;
     try {
       await this.voice.startSession();
       this.voiceChatActive = true;
