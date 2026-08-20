@@ -59,6 +59,7 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
   private readonly chromiumSession: ChromiumRealtimeSession;
   private sessionReset?: Promise<void>;
   private outputAudioFrames = 0;
+  private outputNotificationFrames = 0;
 
   constructor(
     private readonly host: CodexRealtimeHost,
@@ -141,6 +142,7 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
     this.inputBytes = 0;
     this.inputHadSignal = false;
     this.outputAudioFrames = 0;
+    this.outputNotificationFrames = 0;
     this.pending.length = 0;
     this.appendChain = Promise.resolve();
     this.inputItemId = crypto.randomUUID();
@@ -276,14 +278,32 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
   }
 
   private enqueueAppend(audio: Buffer): void {
-    this.chromiumSession.appendInput(audio);
+    this.appendChain = this.appendChain.then(async () => {
+      this.chromiumSession.appendInput(audio);
+    });
   }
 
   private handleNotification(notification: CodexNotification): void {
     this.chromiumSession.handleNotification(notification);
     const params = notification.params ?? {};
+    if (
+      notification.method === "thread/realtime/started" ||
+      notification.method === "thread/realtime/closed" ||
+      notification.method === "thread/realtime/error" ||
+      notification.method === "thread/realtime/transcript/delta" ||
+      notification.method === "thread/realtime/transcript/done"
+    ) {
+      this.logger.info("Codex realtime notification", { method: notification.method });
+    }
     switch (notification.method) {
       case "thread/realtime/outputAudio/delta":
+        if (this.outputNotificationFrames < 3) {
+          this.outputNotificationFrames += 1;
+          this.logger.info("Codex realtime outputAudio notification received", {
+            frame: this.outputNotificationFrames,
+            hasAudio: Boolean(asAudioChunk(params.audio)),
+          });
+        }
         this.onOutputAudio(params.audio);
         break;
       case "thread/realtime/transcript/delta":

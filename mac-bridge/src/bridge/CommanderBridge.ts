@@ -31,6 +31,14 @@ type ClientSession = {
   pttActive: boolean;
 };
 
+type VoiceDiagnosticEvent = {
+  id: number;
+  at: number;
+  type: "caption" | "audio_start" | "audio_end" | "error";
+  role?: "user" | "assistant";
+  text?: string;
+};
+
 export class CommanderBridge {
   private readonly pairing: PairingStore;
   private readonly codex: CodexController;
@@ -55,6 +63,8 @@ export class CommanderBridge {
   private audioInputDeviceLabel?: string;
   private audioInputTransport: "none" | "visor" | "management_page" | "chromium_native" = "none";
   private managementAudioAt = 0;
+  private voiceDiagnosticEventId = 0;
+  private readonly voiceDiagnosticEvents: VoiceDiagnosticEvent[] = [];
 
   constructor(
     private readonly config: BridgeConfig,
@@ -97,6 +107,7 @@ export class CommanderBridge {
       if (this.localAudioOutput === "mac_only") return;
       if (!this.audioResponseActive) {
         this.audioResponseActive = true;
+        this.recordVoiceEvent({ type: "audio_start" });
         this.broadcast(this.journal.create({
           type: "assistant_audio_start",
           sampleRate: 24_000,
@@ -124,14 +135,17 @@ export class CommanderBridge {
       this.logger.info("Audio input device selected", { label });
     });
     this.voice.on("audioEnd", (transcript: string) => {
+      if (transcript) this.recordVoiceEvent({ type: "audio_end", text: transcript });
       if (!this.audioResponseActive) return;
       this.audioResponseActive = false;
       this.broadcast(this.journal.create({ type: "assistant_audio_end", ...(transcript ? { transcript } : {}) }, false));
     });
     this.voice.on("caption", (role: "user" | "assistant", text: string) => {
+      this.recordVoiceEvent({ type: "caption", role, text });
       this.broadcast(this.journal.create({ type: "caption", role, text }, false));
     });
     this.voice.on("error", (error: Error) => {
+      this.recordVoiceEvent({ type: "error", text: error.message });
       this.broadcast(this.journal.create({ type: "assistant_audio_end" }, false));
       this.audioResponseActive = false;
       if (!(error instanceof VoiceClientError) || error.code === "realtime_unavailable" || error.code === "realtime_error") {
@@ -197,6 +211,7 @@ export class CommanderBridge {
       visorConnected: [...this.sessions.values()].some((session) => session.authenticated),
       input: now - this.inputLevelAt < 600 ? this.inputLevel : { rms: 0, peak: 0, active: false },
       output: now - this.outputLevelAt < 600 ? this.outputLevel : { rms: 0, peak: 0, active: false },
+      voiceEvents: this.voiceDiagnosticEvents.map((event) => ({ ...event })),
     };
   }
   setAudioInputSource(source: AudioInputSource): void {
@@ -521,6 +536,18 @@ export class CommanderBridge {
     this.imageCards.unshift(image);
     if (this.imageCards.length > 20) this.imageCards.length = 20;
     this.broadcast(this.journal.create({ type: "image_card", image }));
+  }
+
+  private recordVoiceEvent(event: Omit<VoiceDiagnosticEvent, "id" | "at">): void {
+    const at = Date.now();
+    const previous = this.voiceDiagnosticEvents[this.voiceDiagnosticEvents.length - 1];
+    if (event.type === "caption" && previous?.type === "caption" && previous.role === event.role) {
+      previous.text = event.text;
+      previous.at = at;
+      return;
+    }
+    this.voiceDiagnosticEvents.push({ id: ++this.voiceDiagnosticEventId, at, ...event });
+    if (this.voiceDiagnosticEvents.length > 80) this.voiceDiagnosticEvents.splice(0, this.voiceDiagnosticEvents.length - 80);
   }
 
   private broadcast(message: ServerControlMessage): void {

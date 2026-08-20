@@ -4,7 +4,6 @@ import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 
@@ -38,6 +37,7 @@ const PAGE_SOURCE = String.raw`<!doctype html>
   let inputMeterVisorGain;
   let inputMeterMicGain;
   let inputMeterSinkGain;
+  let events;
 
   const applyOutputRouting = () => {
     if (remoteMonitorGain) {
@@ -140,6 +140,9 @@ const PAGE_SOURCE = String.raw`<!doctype html>
         if (message.type === 'input-active') {
           inputActive = message.active === true;
           applyInputRouting();
+          if (events && events.readyState === WebSocket.OPEN) {
+            events.send(JSON.stringify({ type: inputActive ? 'input_audio.resume' : 'input_audio.pause' }));
+          }
           send({ type: 'input-active', active: inputActive });
         }
         if (message.type === 'close') {
@@ -235,7 +238,9 @@ const PAGE_SOURCE = String.raw`<!doctype html>
         for (const report of reports) {
           if (report.type === 'outbound-rtp' && report.kind === 'audio') {
             send({ type: 'input-stats', bytesSent: report.bytesSent, packetsSent: report.packetsSent });
-            break;
+          }
+          if (report.type === 'inbound-rtp' && report.kind === 'audio') {
+            send({ type: 'output-stats', bytesReceived: report.bytesReceived, packetsReceived: report.packetsReceived, audioLevel: report.audioLevel });
           }
         }
       } catch {
@@ -245,8 +250,11 @@ const PAGE_SOURCE = String.raw`<!doctype html>
     if (inputSource === 'mac') send({ type: 'microphone-device', label: '等待 macOS AVFoundation 麦克风' });
 
     peerConnection = new RTCPeerConnection();
-    const events = peerConnection.createDataChannel('oai-events');
-    events.onopen = () => send({ type: 'data-channel', state: 'open' });
+    events = peerConnection.createDataChannel('oai-events');
+    events.onopen = () => {
+      send({ type: 'data-channel', state: 'open' });
+      if (inputActive) events.send(JSON.stringify({ type: 'input_audio.resume' }));
+    };
     events.onmessage = (event) => send({ type: 'event', value: event.data });
     peerConnection.onconnectionstatechange = () => send({ type: 'state', state: peerConnection.connectionState });
     peerConnection.oniceconnectionstatechange = () => send({ type: 'ice-state', state: peerConnection.iceConnectionState });
@@ -257,6 +265,14 @@ const PAGE_SOURCE = String.raw`<!doctype html>
           await remoteContext.resume();
         }
         const stream = event.streams[0] || new MediaStream([event.track]);
+        const remoteAudioElement = document.createElement('audio');
+        remoteAudioElement.autoplay = true;
+        remoteAudioElement.playsInline = true;
+        remoteAudioElement.volume = 0;
+        remoteAudioElement.srcObject = stream;
+        remoteAudioElement.style.display = 'none';
+        document.body.appendChild(remoteAudioElement);
+        await remoteAudioElement.play().catch(() => undefined);
         const source = remoteContext.createMediaStreamSource(stream);
         const processor = remoteContext.createScriptProcessor(4096, 2, 1);
         processor.onaudioprocess = (audioEvent) => {
@@ -279,7 +295,7 @@ const PAGE_SOURCE = String.raw`<!doctype html>
         remoteMonitorGain.connect(remoteContext.destination);
         applyOutputRouting();
         send({ type: 'remote-sample-rate', sampleRate: remoteContext.sampleRate });
-        send({ type: 'remote-track' });
+        send({ type: 'remote-track', kind: event.track.kind, enabled: event.track.enabled, muted: event.track.muted, readyState: event.track.readyState });
       } catch (error) {
         fail(error);
       }
@@ -326,6 +342,8 @@ export class ChromiumRealtimeSession extends EventEmitter {
   private rejectStart?: (error: Error) => void;
   private remoteAudioFrames = 0;
   private remoteAudioBytes = 0;
+  private inputAudioFrames = 0;
+  private remoteAudibleFrames = 0;
   private inputSource: AudioInputSource;
   private inputActive = false;
 
@@ -348,6 +366,8 @@ export class ChromiumRealtimeSession extends EventEmitter {
     this.remoteSampleRate = 48_000;
     this.remoteAudioFrames = 0;
     this.remoteAudioBytes = 0;
+    this.inputAudioFrames = 0;
+    this.remoteAudibleFrames = 0;
     this.inputActive = false;
     this.offerRequested = false;
     this.connected = false;
@@ -378,6 +398,13 @@ export class ChromiumRealtimeSession extends EventEmitter {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
       this.logger?.warn?.('native realtime input dropped because Chromium is not connected');
       return;
+    }
+    this.inputAudioFrames += 1;
+    if (this.inputAudioFrames <= 3 || this.inputAudioFrames % 25 === 0) {
+      this.logger?.info?.('Chromium realtime PCM injected into persistent WebRTC track', {
+        bytes: audio.byteLength,
+        frame: this.inputAudioFrames,
+      });
     }
     this.socket.send(audio);
   }
@@ -556,7 +583,12 @@ export class ChromiumRealtimeSession extends EventEmitter {
       return;
     }
     if (type === 'remote-track') {
-      this.logger?.info?.('Chromium realtime remote audio track received');
+      this.logger?.info?.('Chromium realtime remote audio track received', {
+        kind: message.kind,
+        enabled: message.enabled,
+        muted: message.muted,
+        readyState: message.readyState,
+      });
       return;
     }
     if (type === 'event') {
@@ -564,7 +596,7 @@ export class ChromiumRealtimeSession extends EventEmitter {
       try {
         const event = JSON.parse(value) as { type?: unknown; error?: { message?: unknown } };
         const eventType = typeof event.type === 'string' ? event.type : '';
-        if (eventType === 'input_audio_buffer.committed' || eventType === 'response.created' || eventType === 'response.done' || eventType === 'error') {
+        if (eventType === 'input_audio_buffer.committed' || eventType === 'response.created' || eventType === 'response.done' || eventType === 'session.updated' || eventType === 'error') {
           this.logger?.info?.('Codex realtime data-channel event', { type: eventType, message: typeof event.error?.message === 'string' ? event.error.message : undefined });
         }
       } catch {
@@ -593,6 +625,14 @@ export class ChromiumRealtimeSession extends EventEmitter {
       });
       return;
     }
+    if (type === 'output-stats') {
+      this.logger?.info?.('Chromium realtime output RTP stats', {
+        bytesReceived: typeof message.bytesReceived === 'number' ? message.bytesReceived : 0,
+        packetsReceived: typeof message.packetsReceived === 'number' ? message.packetsReceived : 0,
+        audioLevel: typeof message.audioLevel === 'number' ? message.audioLevel : undefined,
+      });
+      return;
+    }
     if (type === 'state' && message.state === 'connected') {
       this.connected = true;
       this.resolveStart?.();
@@ -617,7 +657,7 @@ export class ChromiumRealtimeSession extends EventEmitter {
         codexResponseItemPrefix: null,
         initialItems: [],
         outputModality: 'audio',
-        realtimeSessionId: randomUUID(),
+        realtimeSessionId: null,
         version: 'v3',
         transport: { type: 'webrtc', sdp },
         voice: 'juniper',
@@ -647,11 +687,22 @@ export class ChromiumRealtimeSession extends EventEmitter {
     if (sampleCount <= 0) return;
     this.remoteAudioFrames += 1;
     this.remoteAudioBytes += audio.byteLength;
-    this.emit('outputLevel', measurePcm16(audio.subarray(0, sampleCount * 2)));
+    const level = measurePcm16(audio.subarray(0, sampleCount * 2));
+    this.emit('outputLevel', level);
+    if (level.peak > 0.002 && this.remoteAudibleFrames < 3) {
+      this.remoteAudibleFrames += 1;
+      this.logger?.info?.('Chromium realtime audible remote audio frame received', {
+        bytes: audio.byteLength,
+        peak: level.peak,
+        frame: this.remoteAudibleFrames,
+      });
+    }
     if (this.remoteAudioFrames <= 3) {
       this.logger?.info?.('Chromium realtime remote audio frame received', {
         bytes: audio.byteLength,
         sampleRate: this.remoteSampleRate,
+        rms: level.rms,
+        peak: level.peak,
         frame: this.remoteAudioFrames,
       });
     }

@@ -298,6 +298,13 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     .bar { height: 14px; margin: 16px 0 10px; overflow: hidden; border-radius: 999px; background: #071317; }
     .fill { width: 0%; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #36c7ff, #67e5c6, #ffd166); transition: width .12s linear; }
     .values { display: flex; justify-content: space-between; color: #96b4bc; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .transcript-panel { display: grid; gap: 12px; }
+    .voice-events { display: grid; gap: 8px; max-height: 300px; overflow: auto; }
+    .voice-event { padding: 10px 12px; border-left: 3px solid #5f8490; border-radius: 8px; background: #0b1b22; color: #e7f7f7; white-space: pre-wrap; word-break: break-word; }
+    .voice-event.user { border-left-color: #65c7ff; }
+    .voice-event.assistant { border-left-color: #63e4d1; }
+    .voice-event.error { border-left-color: #ff8176; color: #ffd1cb; }
+    .voice-event-label { display: block; margin-bottom: 4px; color: #9bbac2; font-size: 12px; font-weight: 800; }
     .action { display: grid; grid-template-columns: minmax(0, 1fr) 220px; align-items: end; gap: 18px; }
     .voice-control { display: flex; align-items: center; justify-content: space-between; gap: 24px; border-color: rgba(255, 204, 128, .36); background: linear-gradient(120deg, rgba(255, 204, 128, .13), rgba(255, 255, 255, .04)); }
     .voice-state { margin-top: 10px; color: #ffd28a; font-size: 17px; font-weight: 700; }
@@ -322,6 +329,7 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
       <div class="meter"><div class="meter-head"><div class="meter-title">输入电平</div><div id="inputStatus" class="meter-status">未采集</div></div><div class="bar"><div id="inputFill" class="fill"></div></div><div class="values"><span id="inputRms">RMS 0.000</span><span id="inputPeak">Peak 0.000</span></div></div>
       <div class="meter"><div class="meter-head"><div class="meter-title">服务器返回电平</div><div id="outputStatus" class="meter-status">未收到</div></div><div class="bar"><div id="outputFill" class="fill"></div></div><div class="values"><span id="outputRms">RMS 0.000</span><span id="outputPeak">Peak 0.000</span></div></div>
     </section>
+    <section class="panel transcript-panel"><div class="meter-head"><div><div class="meter-title">服务器解析 / 原生返回</div><div class="hint">和眼镜使用同一份 Voice Chat 事件；这里能区分“识别到了”与“收到音频”。</div></div><div id="voiceEventStatus" class="meter-status">等待服务器返回</div></div><div id="voiceEvents" class="voice-events"></div></section>
     <section class="panel voice-control"><div><div class="eyebrow">VOICE CHAT 总控</div><h2>会话生命周期</h2><div class="voice-state" id="voiceChatStatus">正在读取 Voice Chat 状态...</div><div class="hint">先启动会话，再测试输入和服务器返回；挂断后所有测试按钮都会锁定。</div></div><button id="voiceChatButton" class="primary" type="button">启动 Voice Chat</button></section>
     <section class="panel action"><div><div id="status">正在读取 Bridge 状态...</div><div class="hint">先用已生成的 hi there 音频验证服务器返回；电脑麦克风录音随后接入。</div></div><div class="actions"><button id="sampleButton" type="button">发送测试 hi there</button><button id="testButton" type="button">开始音频测试</button></div></section>
     <p class="hint">管理页只允许从本机访问。当前设置只作用于运行中的 Bridge，重启后回到环境变量默认值。</p>
@@ -342,6 +350,8 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     const outputPeak = document.querySelector('#outputPeak');
     const inputStatus = document.querySelector('#inputStatus');
     const outputStatus = document.querySelector('#outputStatus');
+    const voiceEventStatus = document.querySelector('#voiceEventStatus');
+    const voiceEvents = document.querySelector('#voiceEvents');
     let testActive = false;
     let voiceChatActive = false;
     let actionMessage = '';
@@ -353,6 +363,38 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     const clamp = (value) => Math.max(0, Math.min(1, Number(value) || 0));
     const meterWidth = (level) => Math.min(100, Math.max(0, Math.round(clamp(level.peak) * 100)));
     const showAction = (message) => { actionMessage = message; status.textContent = message; };
+    const renderVoiceEvents = (events) => {
+      const items = Array.isArray(events) ? events.slice(-40) : [];
+      voiceEvents.replaceChildren();
+      if (!items.length) {
+        voiceEventStatus.textContent = '等待服务器返回';
+        const empty = document.createElement('div');
+        empty.className = 'hint';
+        empty.textContent = '发送 hi there 或开始音频测试后，服务器识别文本和原生音频状态会显示在这里。';
+        voiceEvents.append(empty);
+        return;
+      }
+      for (const event of items) {
+        const row = document.createElement('div');
+        const role = event.role === 'user' ? 'user' : event.role === 'assistant' ? 'assistant' : event.type;
+        row.className = 'voice-event ' + role;
+        const label = document.createElement('span');
+        label.className = 'voice-event-label';
+        label.textContent = event.type === 'caption'
+          ? (event.role === 'user' ? '我说 / 服务器识别' : '服务器回复文本')
+          : event.type === 'audio_start'
+            ? '服务器已返回原生音频'
+            : event.type === 'audio_end'
+              ? '原生音频结束'
+              : 'Voice Chat 错误';
+        const body = document.createElement('span');
+        body.textContent = event.text || (event.type === 'audio_start' ? '正在通过 Chromium WebRTC 播放' : event.type === 'audio_end' ? '播放完成' : '未提供附加信息');
+        row.append(label, body);
+        voiceEvents.append(row);
+      }
+      voiceEventStatus.textContent = items.length + ' 条实时事件';
+      voiceEvents.scrollTop = voiceEvents.scrollHeight;
+    };
     const floatToPcm16 = (samples, sampleRate) => {
       const outputLength = Math.max(1, Math.floor(samples.length * 24000 / sampleRate));
       const output = new Int16Array(outputLength);
@@ -435,6 +477,7 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
       outputPeak.textContent = 'Peak ' + clamp(output.peak).toFixed(3);
       inputStatus.textContent = input.active ? '有声音' : (value.testActive ? '等待输入' : '未采集');
       outputStatus.textContent = output.active ? '已收到返回' : '未收到返回';
+      renderVoiceEvents(value.voiceEvents);
       testActive = value.testActive === true;
       sampleButton.disabled = !voiceChatActive || testActive;
       testButton.disabled = !voiceChatActive && !testActive;
