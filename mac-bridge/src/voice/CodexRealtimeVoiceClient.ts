@@ -55,6 +55,8 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
   private readonly captions = new CaptionLog();
   private readonly orchestrator: RealtimeSessionOrchestrator;
   private readonly chromiumSession: ChromiumRealtimeSession;
+  private sessionReset?: Promise<void>;
+  private outputAudioFrames = 0;
 
   constructor(
     private readonly host: CodexRealtimeHost,
@@ -98,8 +100,10 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
   }
 
   async beginInput(): Promise<void> {
+    if (this.sessionReset) await this.sessionReset;
     this.inputStarted = true;
     this.inputBytes = 0;
+    this.outputAudioFrames = 0;
     this.pending.length = 0;
     this.inputItemId = crypto.randomUUID();
     this.captions.beginUserTurn();
@@ -245,8 +249,10 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
         this.logger.warn("Codex realtime error", message);
         this.sessionActive = false;
         this.sessionFailure = message;
-        if (message.includes("access denied") || this.inputStarted || this.waitingForReply) {
+        const turnOpen = this.inputStarted || this.waitingForReply;
+        if (message.includes("access denied") || turnOpen) {
           this.failOpenTurn(voiceUnavailableMessage(message));
+          if (turnOpen) this.resetRealtimeSession();
           void this.orchestrator.handleClosed();
           break;
         }
@@ -273,8 +279,13 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
     if (!chunk) return;
     const pcm = Buffer.from(chunk.data, "base64");
     if (pcm.byteLength === 0) return;
+    if (!hasAudibleSignal(pcm)) return;
     if (chunk.sampleRate !== AUDIO_SAMPLE_RATE) {
       this.logger.warn("Codex realtime sample rate differs from glasses PCM", { sampleRate: chunk.sampleRate });
+    }
+    if (this.outputAudioFrames < 3) {
+      this.outputAudioFrames += 1;
+      this.logger.info("Codex realtime audible audio frame", { bytes: pcm.byteLength, frame: this.outputAudioFrames });
     }
     this.outputStarted = true;
     this.clearWaitingForReply();
@@ -325,6 +336,7 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
     this.replyTimer = setTimeout(() => {
       if (!this.waitingForReply) return;
       this.failOpenTurn("语音没有返回结果，请再说一次");
+      this.resetRealtimeSession();
     }, REPLY_TIMEOUT_MS);
     this.replyTimer.unref();
   }
@@ -339,6 +351,18 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
     clearTimeout(this.replyTimer);
     this.replyTimer = undefined;
   }
+
+  private resetRealtimeSession(): void {
+    if (this.sessionReset) return;
+    const threadId = this.threadId;
+    this.sessionActive = false;
+    this.sessionReset = (async () => {
+      if (threadId) await this.host.requestJsonRpc("thread/realtime/stop", { threadId }).catch(() => undefined);
+      await this.chromiumSession.close();
+    })().finally(() => {
+      this.sessionReset = undefined;
+    });
+  }
 }
 //#endregion
 
@@ -352,6 +376,13 @@ function voiceUnavailableMessage(detail: string | null): string {
 
 function captionRole(value: unknown): CaptionRole {
   return typeof value === "string" && value.toLowerCase() === "user" ? "user" : "assistant";
+}
+
+function hasAudibleSignal(pcm: Buffer): boolean {
+  for (let offset = 0; offset + 1 < pcm.byteLength; offset += 2) {
+    if (Math.abs(pcm.readInt16LE(offset)) > 8) return true;
+  }
+  return false;
 }
 
 function silenceFrame(durationMs: number): Buffer {

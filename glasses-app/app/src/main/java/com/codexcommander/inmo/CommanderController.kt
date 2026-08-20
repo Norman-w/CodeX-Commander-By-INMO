@@ -48,6 +48,8 @@ class CommanderController(context: Context) : BridgeClient.Listener {
     private val handler = Handler(Looper.getMainLooper())
     private val ptt = PttStateMachine(preferences.pttMode)
     private val approvalSelector = ApprovalSelector()
+    private var liveUserCaptionSeen = false
+    private var liveAssistantCaptionSeen = false
     private val mutableState = MutableStateFlow(
         HudState(
             connection = if (preferences.endpoint.isBlank()) ConnectionState.UNCONFIGURED else ConnectionState.DISCONNECTED,
@@ -383,7 +385,7 @@ class CommanderController(context: Context) : BridgeClient.Listener {
                 update {
                     it.copy(
                         taskMessage = HudText.caption(message.role, message.text),
-                        recentContext = appendContext(
+                        recentContext = appendCaptionContext(
                             it.recentContext,
                             HudContextLine(message.role, HudText.caption(message.role, message.text)),
                         ),
@@ -549,6 +551,8 @@ class CommanderController(context: Context) : BridgeClient.Listener {
             update { it.copy(error = "Mac 连接尚未就绪，请稍后再试") }
             return
         }
+        liveUserCaptionSeen = false
+        liveAssistantCaptionSeen = false
         player.stop()
         if (current.playing) {
             markPendingReportHandled()
@@ -635,6 +639,43 @@ class CommanderController(context: Context) : BridgeClient.Listener {
             return (current.dropLast(1) + next).takeLast(MAX_CONTEXT_LINES)
         }
         return (current + next).takeLast(MAX_CONTEXT_LINES)
+    }
+
+    private fun appendCaptionContext(current: List<HudContextLine>, line: HudContextLine): List<HudContextLine> {
+        val text = HudText.plain(line.text)
+        if (text.isBlank()) return current
+        val next = HudContextLine(line.role, text.take(1_200))
+        if (line.role == "user") {
+            if (!liveUserCaptionSeen) {
+                liveUserCaptionSeen = true
+                if (liveAssistantCaptionSeen) {
+                    val assistantIndex = current.indexOfLast { it.role == "assistant" }
+                    if (assistantIndex >= 0) {
+                        return current.toMutableList().apply { add(assistantIndex, next) }.takeLast(MAX_CONTEXT_LINES)
+                    }
+                }
+                return (current + next).takeLast(MAX_CONTEXT_LINES)
+            }
+            return replaceLastCaption(current, "user", next)
+        }
+        if (line.role == "assistant") {
+            if (!liveAssistantCaptionSeen) {
+                liveAssistantCaptionSeen = true
+                return (current + next).takeLast(MAX_CONTEXT_LINES)
+            }
+            return replaceLastCaption(current, "assistant", next)
+        }
+        return appendContext(current, next)
+    }
+
+    private fun replaceLastCaption(
+        current: List<HudContextLine>,
+        role: String,
+        next: HudContextLine,
+    ): List<HudContextLine> {
+        val index = current.indexOfLast { it.role == role }
+        if (index < 0) return (current + next).takeLast(MAX_CONTEXT_LINES)
+        return current.toMutableList().apply { set(index, next) }.takeLast(MAX_CONTEXT_LINES)
     }
 
     private inline fun runOnMain(crossinline block: () -> Unit) {

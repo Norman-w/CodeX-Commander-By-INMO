@@ -58,7 +58,14 @@ export class CommanderBridge {
       logger
     );
 
-    this.codex.on("taskEvent", (event) => this.broadcast(this.journal.create({ type: "task_event", ...event })));
+    this.codex.on("taskEvent", (event) => {
+      this.logger.info("Codex task event", {
+        phase: event.phase,
+        final: event.final,
+        message: event.message,
+      });
+      this.broadcast(this.journal.create({ type: "task_event", ...event }));
+    });
     this.codex.on("approvalRequested", (approval) => this.broadcast(this.journal.create({ type: "approval_request", approval })));
     this.codex.on("approvalResolved", (approvalRequestId, resolution) => {
       this.broadcast(this.journal.create({ type: "approval_resolved", approvalRequestId, resolution }));
