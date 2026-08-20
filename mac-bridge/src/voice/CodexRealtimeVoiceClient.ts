@@ -66,8 +66,8 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
   constructor(
     private readonly host: CodexRealtimeHost,
     private readonly logger: Logger,
-    localAudioOutput: LocalAudioOutput = "visor_only",
-    audioInputSource: AudioInputSource = "visor"
+    localAudioOutput: LocalAudioOutput = "mac_and_visor",
+    audioInputSource: AudioInputSource = "mac"
   ) {
     super();
     this.orchestrator = new RealtimeSessionOrchestrator({

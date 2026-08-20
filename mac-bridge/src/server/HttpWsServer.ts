@@ -300,14 +300,16 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     body { margin: 0; min-height: 100vh; overflow-x: hidden; background: var(--bg); }
     body::before { content: ""; position: fixed; inset: 0; pointer-events: none; opacity: .32; background-image: linear-gradient(rgba(255,255,255,.045) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px); background-size: 42px 42px; mask-image: linear-gradient(to bottom, black, transparent 82%); }
     body::after { content: ""; position: fixed; inset: -20%; pointer-events: none; background: radial-gradient(circle at 50% 32%, rgba(243,210,122,.07), transparent 28%), radial-gradient(circle at 0% 50%, rgba(114,185,255,.09), transparent 30%), radial-gradient(circle at 100% 50%, rgba(255,154,106,.08), transparent 30%); }
-    main { position: relative; z-index: 1; width: min(1480px, 100%); margin: 0 auto; padding: 26px clamp(18px, 4vw, 64px) 56px; }
-    .topbar { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+    main { position: relative; z-index: 1; display: flex; width: min(1480px, 100%); height: 100svh; min-height: 560px; flex-direction: column; margin: 0 auto; padding: 26px clamp(18px, 4vw, 64px); overflow: hidden; }
+    .topbar { position: relative; z-index: 12; display: flex; align-items: center; justify-content: space-between; gap: 24px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
     .brand { display: flex; align-items: center; gap: 11px; color: var(--ink); font-size: 13px; font-weight: 700; letter-spacing: .1em; }
     .brand-mark { width: 10px; height: 10px; border: 2px solid var(--signal); border-radius: 50%; box-shadow: 0 0 0 5px rgba(243,210,122,.1); }
     .system-readout { display: flex; align-items: center; gap: 12px; color: var(--muted); font: 11px "SF Mono", Menlo, monospace; letter-spacing: .1em; text-transform: uppercase; }
     .readout-label { color: var(--dim); }
-    .workspace { display: grid; grid-template-columns: minmax(132px, .65fr) minmax(460px, 1.8fr) minmax(132px, .65fr); gap: clamp(24px, 5vw, 80px); min-height: 650px; padding: 34px 0 30px; }
-    .signal-rail { position: relative; display: flex; min-height: 590px; flex-direction: column; justify-content: space-between; padding: 18px 0; }
+    .status-toggle { width: auto; min-height: 34px; padding: 7px 11px; border-color: rgba(244,238,230,.22); color: var(--muted); background: rgba(255,255,255,.05); font: 10px "SF Mono", Menlo, monospace; letter-spacing: .06em; }
+    .status-toggle[data-open="true"] { border-color: rgba(243,210,122,.65); color: var(--signal); }
+    .workspace { display: grid; grid-template-columns: minmax(132px, .65fr) minmax(460px, 1.8fr) minmax(132px, .65fr); flex: 1; min-height: 0; gap: clamp(24px, 5vw, 80px); padding: 24px 0 18px; }
+    .signal-rail { position: relative; display: flex; min-height: 0; flex-direction: column; justify-content: space-between; padding: 18px 0; }
     .signal-rail::before { content: ""; position: absolute; top: 0; bottom: 0; width: 1px; background: linear-gradient(transparent, var(--line) 14%, var(--line) 86%, transparent); }
     .signal-left::before { right: -16px; }
     .signal-right::before { left: -16px; }
@@ -316,14 +318,14 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     .rail-name { color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
     .rail-status { color: var(--input); font-size: 12px; }
     .signal-right .rail-status { color: var(--output); }
-    .rail-track { position: relative; flex: 1; width: 48px; min-height: 360px; margin: 28px auto; overflow: hidden; border: 1px solid var(--line); background: rgba(255,255,255,.025); }
+    .rail-track { position: relative; flex: 1; width: 48px; min-height: 0; margin: 24px auto; overflow: hidden; border: 1px solid var(--line); background: rgba(255,255,255,.025); }
     .rail-track::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(to bottom, transparent 0, transparent 15px, rgba(255,255,255,.12) 16px); }
     .rail-fill { position: absolute; right: 0; bottom: 0; left: 0; z-index: 1; height: 0; background: linear-gradient(to top, rgba(114,185,255,.18), var(--input)); box-shadow: 0 0 26px rgba(114,185,255,.48); transition: height .12s linear; }
     .signal-right .rail-fill { background: linear-gradient(to top, rgba(255,154,106,.16), var(--output)); box-shadow: 0 0 26px rgba(255,154,106,.42); }
     .rail-fill::after { content: ""; position: absolute; top: 0; right: 0; left: 0; height: 2px; background: #fff; box-shadow: 0 0 13px currentColor; }
     .rail-values { display: grid; gap: 6px; color: var(--muted); font: 11px "SF Mono", Menlo, monospace; }
     .rail-values span:last-child { color: var(--dim); }
-    .call-stage { position: relative; display: flex; min-height: 590px; flex-direction: column; align-items: center; justify-content: center; padding: 20px 0 0; text-align: center; }
+    .call-stage { position: relative; display: flex; min-height: 0; flex-direction: column; align-items: center; justify-content: center; padding: 10px 0 0; text-align: center; }
     .stage-kicker { color: var(--signal); font: 11px "SF Mono", Menlo, monospace; letter-spacing: .2em; text-transform: uppercase; }
     h1 { max-width: 700px; margin: 18px 0 12px; font-size: clamp(44px, 7vw, 92px); font-weight: 500; letter-spacing: -.075em; line-height: .94; }
     .lede { max-width: 530px; margin: 0; color: var(--muted); font-size: 15px; line-height: 1.65; }
@@ -381,11 +383,17 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     .talk-key[data-active="true"] .key-icon { color: var(--input); box-shadow: 0 0 18px rgba(114,185,255,.35); }
     .status-line { min-height: 22px; margin-top: 14px; color: var(--signal); font-size: 12px; text-align: left; }
     .control-hint { margin-top: 4px; color: var(--muted); font-size: 12px; line-height: 1.5; text-align: left; }
-    .log-panel { margin-top: 2px; padding-top: 22px; border-top: 1px solid var(--line); }
+    .log-backdrop { position: fixed; z-index: 8; inset: 0; display: block; background: rgba(5,5,4,.42); backdrop-filter: blur(4px); }
+    .log-backdrop[data-open="false"] { display: none; }
+    .log-panel { position: fixed; z-index: 9; right: clamp(16px, 4vw, 64px); bottom: 22px; left: clamp(16px, 4vw, 64px); display: flex; max-height: min(48svh, 520px); flex-direction: column; margin: 0 auto; padding: 22px 24px 18px; overflow: hidden; border: 1px solid rgba(244,238,230,.2); background: rgba(24,23,21,.94); box-shadow: 0 28px 90px rgba(0,0,0,.42); backdrop-filter: blur(22px); }
+    .log-panel[data-open="false"] { display: none; }
     .log-heading { display: flex; align-items: end; justify-content: space-between; gap: 20px; }
+    .log-heading-actions { display: flex; align-items: center; gap: 14px; }
+    .log-close { display: grid; width: 38px; min-height: 38px; place-items: center; padding: 0; border-color: rgba(244,238,230,.2); color: var(--muted); }
+    .log-close svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-width: 1.8; }
     .log-title { margin-top: 7px; font-size: 24px; letter-spacing: -.04em; }
     .meter-status { color: var(--signal); font: 11px "SF Mono", Menlo, monospace; }
-    .voice-events { display: grid; gap: 1px; min-height: 76px; max-height: 360px; margin-top: 18px; overflow-y: auto; overscroll-behavior: auto; border-top: 1px solid var(--line); scrollbar-color: rgba(244,238,230,.28) transparent; }
+    .voice-events { display: grid; min-height: 120px; flex: 1; gap: 1px; margin-top: 18px; overflow-y: auto; overscroll-behavior: auto; border-top: 1px solid var(--line); scrollbar-color: rgba(244,238,230,.28) transparent; }
     .voice-event { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 18px; padding: 16px 4px; border-bottom: 1px solid var(--line); color: var(--ink); white-space: pre-wrap; word-break: break-word; }
     .voice-event.user { color: var(--input); }
     .voice-event.assistant { color: var(--output); }
@@ -395,7 +403,7 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     .hint { color: var(--muted); font-size: 12px; line-height: 1.55; }
     footer { display: flex; justify-content: space-between; gap: 20px; margin-top: 22px; color: var(--dim); font: 10px "SF Mono", Menlo, monospace; letter-spacing: .08em; text-transform: uppercase; }
     @media (max-width: 900px) { .workspace { grid-template-columns: 86px minmax(0, 1fr) 86px; gap: 24px; } h1 { font-size: clamp(42px, 8vw, 72px); } }
-    @media (max-width: 680px) { main { padding-top: 20px; } .topbar { align-items: flex-start; flex-direction: column; } .system-readout { align-self: stretch; justify-content: space-between; } .workspace { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; min-height: 0; padding-top: 24px; } .call-stage { grid-column: 1 / -1; grid-row: 1; min-height: 650px; padding-top: 0; } .signal-left { grid-column: 1; grid-row: 2; min-height: 250px; } .signal-right { grid-column: 2; grid-row: 2; min-height: 250px; } .rail-track { min-height: 130px; margin: 14px auto; } .control-grid, .action-row { grid-template-columns: 1fr; } .voice-event { grid-template-columns: 1fr; gap: 7px; } footer { flex-direction: column; } }
+    @media (max-width: 680px) { main { padding-top: 20px; } .topbar { align-items: flex-start; flex-direction: column; } .system-readout { align-self: stretch; justify-content: space-between; } .workspace { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; min-height: 0; padding-top: 16px; } .call-stage { grid-column: 1 / -1; grid-row: 1; min-height: 0; padding-top: 0; } .signal-left { grid-column: 1; grid-row: 2; min-height: 0; } .signal-right { grid-column: 2; grid-row: 2; min-height: 0; } .rail-track { min-height: 80px; margin: 10px auto; } .control-dock { margin-top: 22px; } .control-grid, .action-row { grid-template-columns: 1fr; } .voice-event { grid-template-columns: 1fr; gap: 7px; } .log-panel { right: 12px; bottom: 12px; left: 12px; max-height: 58svh; padding: 18px 16px 14px; } footer { flex-direction: column; } }
     @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }
   </style>
 </head>
@@ -403,7 +411,7 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
   <main>
     <header class="topbar">
       <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span>Code X</span></div>
-      <div class="system-readout"><span class="readout-label">通话</span><span id="linkReadout">未接通</span></div>
+      <div class="system-readout"><span class="readout-label">通话</span><span id="linkReadout">未接通</span><button id="logToggle" class="status-toggle" type="button" aria-expanded="true">对话记录</button></div>
     </header>
     <div class="workspace">
       <aside class="signal-rail signal-left" aria-label="输入音频电平">
@@ -431,11 +439,11 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
         </div>
         <div class="control-dock">
           <div class="control-grid">
-            <label class="field"><span class="field-label">输入来源</span><select id="audioInput" disabled><option value="visor">眼镜麦克风</option><option value="mac">电脑麦克风</option></select><span class="field-note">电脑麦克风，或眼镜按住 PTT。</span></label>
-            <label class="field"><span class="field-label">回复播放到</span><select id="localAudio" disabled><option value="visor_only">仅眼镜</option><option value="mac_only">仅电脑</option><option value="mac_and_visor">电脑 + 眼镜</option></select><span class="field-note">选择 Code X 的声音播放位置。</span></label>
+            <label class="field"><span class="field-label">输入来源</span><select id="audioInput" disabled><option value="mac">电脑麦克风</option><option value="visor">眼镜麦克风</option></select><span class="field-note">电脑麦克风，或眼镜按住 PTT。</span></label>
+            <label class="field"><span class="field-label">回复播放到</span><select id="localAudio" disabled><option value="mac_and_visor">电脑 + 眼镜</option><option value="mac_only">仅电脑</option><option value="visor_only">仅眼镜</option></select><span class="field-note">选择 Code X 的声音播放位置。</span></label>
           </div>
           <div class="action-row">
-            <button id="sampleButton" class="audio-key sample-key" type="button" disabled><span class="key-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m9 6 9 6-9 6V6Z" /></svg></span><span id="sampleButtonLabel">播放探针</span></button>
+            <button id="sampleButton" class="audio-key sample-key" type="button" disabled><span class="key-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m9 6 9 6-9 6V6Z" /></svg></span><span id="sampleButtonLabel">注入链路信号</span></button>
             <button id="testButton" class="audio-key talk-key" type="button" disabled><span class="key-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="8" y="3" width="8" height="12" rx="4" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6" /></svg></span><span id="testButtonLabel">开始说话</span></button>
           </div>
           <div id="status" class="status-line">先拨打电话，接通后才能使用音频。</div>
@@ -448,8 +456,9 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
         <div class="rail-values"><span id="outputRms">RMS 0.000</span><span id="outputPeak">PEAK 0.000</span></div>
       </aside>
     </div>
-    <section class="log-panel" aria-live="polite">
-      <div class="log-heading"><div><div class="rail-kicker">对话记录</div><div class="log-title">通话内容</div></div><div id="voiceEventStatus" class="meter-status">暂无对话内容</div></div>
+    <div id="logBackdrop" class="log-backdrop" data-open="true"></div>
+    <section id="logPanel" class="log-panel" data-open="true" role="dialog" aria-modal="false" aria-labelledby="logTitle" aria-live="polite">
+      <div class="log-heading"><div><div class="rail-kicker">对话记录</div><div id="logTitle" class="log-title">通话内容</div></div><div class="log-heading-actions"><div id="voiceEventStatus" class="meter-status">暂无对话内容</div><button id="logClose" class="log-close" type="button" aria-label="关闭对话记录"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg></button></div></div>
       <div id="voiceEvents" class="voice-events"></div>
     </section>
   </main>
@@ -477,6 +486,10 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     const linkReadout = document.querySelector('#linkReadout');
     const callOrb = document.querySelector('#callOrb');
     const controlHint = document.querySelector('#controlHint');
+    const logPanel = document.querySelector('#logPanel');
+    const logBackdrop = document.querySelector('#logBackdrop');
+    const logToggle = document.querySelector('#logToggle');
+    const logClose = document.querySelector('#logClose');
     const callLight = document.querySelector('#callLight');
     const callLightText = document.querySelector('#callLightText');
     const inputLight = document.querySelector('#inputLight');
@@ -494,6 +507,7 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     let dialToneTimer = null;
     let callToneSession = false;
     let callToneConnected = false;
+    let autoOpenMicAfterDial = false;
     let renderedTranscriptSignature = null;
     let lastAudioEndId = null;
     const outputLabels = { visor_only: '仅眼镜', mac_only: '仅电脑', mac_and_visor: '电脑 + 眼镜' };
@@ -502,6 +516,17 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     const clamp = (value) => Math.max(0, Math.min(1, Number(value) || 0));
     const meterWidth = (level) => Math.min(100, Math.max(0, Math.round(clamp(level.peak) * 100)));
     const showAction = (message) => { actionMessage = message; status.textContent = message; };
+    const setLogOpen = (open) => {
+      logPanel.dataset.open = String(open);
+      logBackdrop.dataset.open = String(open);
+      logToggle.dataset.open = String(open);
+      logToggle.setAttribute('aria-expanded', String(open));
+    };
+    logToggle.addEventListener('click', () => setLogOpen(logPanel.dataset.open !== 'true'));
+    logClose.addEventListener('click', () => setLogOpen(false));
+    logBackdrop.addEventListener('click', () => setLogOpen(false));
+    document.addEventListener('keydown', (event) => { if (event.key === 'Escape') setLogOpen(false); });
+    setLogOpen(true);
     const getToneContext = () => {
       const Context = window.AudioContext || window.webkitAudioContext;
       if (!Context) return null;
@@ -695,6 +720,31 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
       processor.connect(silentGain);
       silentGain.connect(context.destination);
     };
+    const autoOpenMicrophone = async () => {
+      autoOpenMicAfterDial = false;
+      let captureStarted = false;
+      try {
+        let browserCapture = false;
+        if (inputControl.value === 'mac') {
+          try {
+            await startMacCapture();
+            captureStarted = true;
+            browserCapture = true;
+          } catch (error) {
+            showAction('网页麦克风暂不可用（' + (error.message || String(error)) + '），改用原生麦克风通道...');
+          }
+        }
+        const response = await fetch('/api/audio-test/start', { method: 'POST' });
+        const value = await response.json();
+        if (!response.ok) throw new Error(value.error || '麦克风打开失败');
+        updateMeters(value);
+        if (inputControl.value === 'mac' && macCapture) macCapture.socket.send(JSON.stringify({ type: 'device', label: macCapture.deviceLabel || '网页麦克风' }));
+        showAction(browserCapture ? '麦克风已打开，可以说话' : inputControl.value === 'visor' ? '麦克风已打开，请使用眼镜 PTT' : '麦克风已打开，等待原生麦克风输入');
+      } catch (error) {
+        if (captureStarted) await stopMacCapture().catch(() => undefined);
+        showAction('麦克风打开失败：' + (error.message || String(error)));
+      }
+    };
     const updateMeters = (value) => {
       const input = value.input || {};
       const output = value.output || {};
@@ -736,23 +786,24 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
       outputControl.disabled = !connected;
       sampleButton.disabled = !connected || testActive;
       sampleButtonLabel.textContent = voiceTurnActive
-        ? (pendingSample ? 'hi there 已排队' : '等待上一轮完成后发送 hi there')
-        : '播放探针';
+        ? (pendingSample ? '链路信号已排队' : '等待上一轮 · 注入信号')
+        : '注入链路信号';
       testButton.disabled = !connected || (!testActive && voiceTurnActive);
       testButton.dataset.active = String(testActive);
-      testButtonLabel.textContent = testActive ? '结束并发送' : '开始说话';
+      testButtonLabel.textContent = testActive ? '关闭麦克风' : '打开麦克风';
       controlHint.textContent = connected
-        ? '通话已接通。可以播放 hi there 探针，或使用 Chrome 麦克风开始一轮对话。'
+        ? '通话已接通。可以注入链路校验信号，或打开麦克风开始一轮对话。'
         : phase === 'starting'
           ? '正在拨号，音频控制将在实时链路接通后解锁。'
           : phase === 'stopping'
             ? '正在挂断，正在释放音频链路。'
             : '未接通前不能播放、录音或切换音频设备。';
+      if (connected && autoOpenMicAfterDial && !testActive) void autoOpenMicrophone();
       if (!actionMessage && value.audioInputDevice) {
         showAction('输入：' + (inputLabels[inputControl.value] || inputControl.value) + '（设备：' + value.audioInputDevice + '，通道：' + (transportLabels[value.audioInputTransport] || value.audioInputTransport || '未知') + '）；输出：' + (outputLabels[outputControl.value] || outputControl.value));
       }
       if (pendingSample && !voiceTurnActive && voiceChatActive && !testActive) {
-        showAction('上一轮已结束，正在发送排队的 hi there 音频...');
+        showAction('上一轮已结束，正在注入排队的链路信号...');
         void sendSample();
       }
     };
@@ -781,7 +832,10 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     voiceChatButton.addEventListener('click', async () => {
       const starting = !voiceChatActive;
       voiceChatButton.disabled = true;
-      if (starting) beginDialTone();
+      if (starting) {
+        beginDialTone();
+        autoOpenMicAfterDial = true;
+      }
       voiceChatStatus.textContent = starting ? '正在启动 Voice Chat...' : '正在挂断 Voice Chat...';
       try {
         const response = await fetch(starting ? '/api/voice-chat/start' : '/api/voice-chat/stop', { method: 'POST' });
@@ -789,10 +843,20 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
         if (!response.ok) throw new Error(value.error || 'Voice Chat 控制失败');
         updateMeters(value);
         if (starting && value.voiceChatActive === true && value.voiceChatPhase === 'connected') stopDialTone();
-        if (starting && value.voiceChatActive !== true && value.voiceChatPhase === 'error') finishCallTone(true);
-        if (!starting && value.voiceChatActive !== true) finishCallTone(true);
+        if (starting && value.voiceChatActive !== true && value.voiceChatPhase === 'error') {
+          autoOpenMicAfterDial = false;
+          finishCallTone(true);
+        }
+        if (!starting && value.voiceChatActive !== true) {
+          autoOpenMicAfterDial = false;
+          await stopMacCapture().catch(() => undefined);
+          finishCallTone(true);
+        }
       } catch (error) {
-        if (starting) finishCallTone(true);
+        if (starting) {
+          autoOpenMicAfterDial = false;
+          finishCallTone(true);
+        }
         voiceChatStatus.textContent = error.message || String(error);
         await poll();
       }
@@ -800,13 +864,13 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     const sendSample = async () => {
       sampleButton.disabled = true;
       pendingSample = false;
-      showAction('正在发送已生成的 hi there 音频...');
+      showAction('正在注入链路校验信号...');
       try {
         const response = await fetch('/api/audio-test/sample', { method: 'POST' });
         const value = await response.json();
         if (!response.ok) throw new Error(value.error || '测试音频发送失败');
         updateMeters(value);
-        showAction('hi there 音频已送入当前 Voice Chat，等待服务器原生返回...');
+        showAction('链路信号已注入，等待 Code X 回复...');
       } catch (error) {
         showAction(error.message || String(error));
       } finally {
@@ -815,13 +879,13 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     };
     sampleButton.addEventListener('click', async () => {
       if (testActive) {
-        showAction('请先停止音频测试，再发送 hi there 音频');
+        showAction('请先关闭麦克风，再注入链路信号');
         return;
       }
       if (voiceTurnActive) {
         pendingSample = true;
-        sampleButtonLabel.textContent = 'hi there 已排队';
-        showAction('上一轮音频仍在等待服务器返回；hi there 已排队，将在这一轮结束后自动发送');
+        sampleButtonLabel.textContent = '链路信号已排队';
+        showAction('上一轮仍在等待回复；链路信号已排队，将在这一轮结束后自动注入');
         return;
       }
       await sendSample();
@@ -831,7 +895,7 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
       const starting = !testActive;
       let captureStarted = false;
       try {
-        showAction(starting && inputControl.value === 'mac' ? '正在请求电脑麦克风权限并连接管理音频通道...' : (starting ? '正在启动音频测试...' : '正在停止音频测试...'));
+        showAction(starting && inputControl.value === 'mac' ? '正在打开电脑麦克风...' : (starting ? '正在打开麦克风...' : '正在关闭麦克风并发送这一轮...'));
         if (starting && inputControl.value === 'mac') {
           try {
             await startMacCapture();
@@ -849,14 +913,14 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
           macCapture.socket.send(JSON.stringify({ type: 'device', label: macCapture.deviceLabel || '网页麦克风' }));
         }
         showAction(starting
-          ? (inputControl.value === 'visor' ? '音频测试已开始；本页不会启动眼镜麦克风，请改选电脑麦克风，或使用眼镜 PTT' : '音频测试已开始，请对电脑麦克风说话')
-          : '音频测试已停止');
+          ? (inputControl.value === 'visor' ? '麦克风已打开，请使用眼镜 PTT' : '麦克风已打开，可以说话')
+          : '麦克风已关闭，这一轮已发送');
       } catch (error) {
         if (captureStarted) await stopMacCapture().catch(() => undefined);
         showAction(error.message || String(error));
       } finally {
         if (!starting) await stopMacCapture().catch(() => undefined);
-        testButton.disabled = !voiceChatActive && !testActive;
+        testButton.disabled = !voiceChatActive || (!testActive && voiceTurnActive);
       }
     });
     window.addEventListener('beforeunload', () => { void stopMacCapture(); });

@@ -361,15 +361,15 @@ export class ChromiumRealtimeSession extends EventEmitter {
   public constructor(
     private readonly host: ChromiumRealtimeHost,
     private readonly logger: any,
-    localAudioOutput: LocalAudioOutput = "visor_only",
-    inputSource: AudioInputSource = "visor"
+    localAudioOutput: LocalAudioOutput = "mac_and_visor",
+    inputSource: AudioInputSource = "mac"
   ) {
     super();
     this.localAudioOutput = localAudioOutput;
     this.inputSource = inputSource;
   }
 
-  private localAudioOutput: LocalAudioOutput = "visor_only";
+  private localAudioOutput: LocalAudioOutput = "mac_and_visor";
 
   public async start(threadId: string): Promise<void> {
     await this.close();
