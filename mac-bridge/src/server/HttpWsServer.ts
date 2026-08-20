@@ -104,6 +104,25 @@ export class HttpWsServer {
 
   private async handleHttp(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
+    if (url.pathname === "/" || url.pathname === "/api/settings") {
+      if (!isLocalRequest(request)) return json(response, 403, { error: "management page is local-only" });
+      if (request.method === "GET" && url.pathname === "/") return html(response, MANAGEMENT_PAGE);
+      if (request.method === "GET" && url.pathname === "/api/settings") {
+        return json(response, 200, {
+          localAudioOutput: this.bridge.getLocalAudioOutput(),
+          default: "visor_only"
+        });
+      }
+      if (request.method === "PUT" && url.pathname === "/api/settings") {
+        const payload = await readJson(request);
+        if (!isRecord(payload) || typeof payload.localAudioOutput !== "boolean") {
+          return json(response, 400, { error: "localAudioOutput must be boolean" });
+        }
+        this.bridge.setLocalAudioOutput(payload.localAudioOutput);
+        return json(response, 200, { ok: true, localAudioOutput: this.bridge.getLocalAudioOutput() });
+      }
+      return json(response, 405, { error: "method not allowed" });
+    }
     if (request.method === "GET" && url.pathname === "/healthz") return json(response, 200, { ok: true });
     if (request.method === "GET" && url.pathname === "/readyz") return json(response, this.bridge.isReady() ? 200 : 503, { ready: this.bridge.isReady() });
     if (request.method === "GET" && url.pathname.startsWith("/media/")) {
@@ -151,6 +170,96 @@ function json(response: ServerResponse, status: number, value: unknown): void {
   });
   response.end(body);
 }
+
+function html(response: ServerResponse, body: string): void {
+  const payload = Buffer.from(body);
+  response.writeHead(200, {
+    "Content-Type": "text/html; charset=utf-8",
+    "Content-Length": payload.byteLength,
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
+    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'"
+  });
+  response.end(payload);
+}
+
+async function readJson(request: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buffer.byteLength;
+    if (size > 32_768) throw new Error("request body too large");
+    chunks.push(buffer);
+  }
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } catch {
+    throw new Error("request body is not valid JSON");
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isLocalRequest(request: IncomingMessage): boolean {
+  const address = request.socket.remoteAddress;
+  return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
+}
+
+const MANAGEMENT_PAGE = String.raw`<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>CodeX Commander Bridge</title>
+  <style>
+    :root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif; background: #091116; color: #edf7fa; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: radial-gradient(circle at 20% 10%, #173b48, #091116 55%); }
+    main { width: min(620px, calc(100vw - 40px)); padding: 34px; border: 1px solid #28505b; border-radius: 24px; background: rgba(11, 28, 35, .92); box-shadow: 0 24px 80px rgba(0,0,0,.35); }
+    h1 { margin: 0 0 8px; font-size: 28px; letter-spacing: -.03em; }
+    p { color: #a8c3ca; line-height: 1.6; }
+    .card { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-top: 28px; padding: 22px; border-radius: 18px; background: #102832; }
+    .label { font-size: 18px; font-weight: 700; }
+    .hint { margin-top: 6px; color: #8caab2; font-size: 14px; }
+    input { width: 48px; height: 28px; accent-color: #38d7ff; }
+    #status { margin-top: 20px; color: #70e6b0; min-height: 24px; }
+    code { color: #79def5; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>CodeX Commander Bridge</h1>
+    <p>macOS 本机管理页。眼镜仍会收到原生音频；这里仅控制 Mac 是否同时监听。</p>
+    <section class="card">
+      <div><div class="label">Mac 本机播放</div><div class="hint">关闭后：仅眼镜播放，避免回声</div></div>
+      <input id="localAudio" type="checkbox" aria-label="Mac 本机播放">
+    </section>
+    <div id="status">正在读取 Bridge 状态…</div>
+    <p class="hint">默认值：<code>visor_only</code>。管理页只允许从本机访问。</p>
+  </main>
+  <script>
+    const control = document.querySelector('#localAudio');
+    const status = document.querySelector('#status');
+    async function load() {
+      const response = await fetch('/api/settings');
+      const value = await response.json();
+      control.checked = value.localAudioOutput === true;
+      status.textContent = control.checked ? 'Mac 本机播放已开启' : '仅眼镜播放已开启';
+    }
+    control.addEventListener('change', async () => {
+      control.disabled = true;
+      const response = await fetch('/api/settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ localAudioOutput: control.checked }) });
+      const value = await response.json();
+      control.disabled = false;
+      control.checked = value.localAudioOutput === true;
+      status.textContent = control.checked ? 'Mac 本机播放已开启' : '仅眼镜播放已开启';
+    });
+    load().catch(() => { status.textContent = '无法读取 Bridge 状态'; });
+  </script>
+</body>
+</html>`;
 
 function toBuffer(data: RawData): Buffer {
   if (Buffer.isBuffer(data)) return data;

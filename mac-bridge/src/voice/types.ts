@@ -11,6 +11,7 @@ export type CommanderVoice = {
   endInput(): Promise<void>;
   abortInput(): void;
   speakSummary(summary: string): Promise<void>;
+  setLocalAudioOutput?(enabled: boolean): void;
   close(): void;
   on(event: "audio", listener: (audio: Buffer) => void): unknown;
   on(event: "audioEnd", listener: (transcript: string) => void): unknown;

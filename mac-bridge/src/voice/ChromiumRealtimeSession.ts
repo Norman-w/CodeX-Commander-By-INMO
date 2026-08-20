@@ -21,6 +21,8 @@ const PAGE_SOURCE = String.raw`<!doctype html>
   let inputNode;
   let peerConnection;
   let remoteContext;
+  let inputMonitorGain;
+  let remoteMonitorGain;
 
   const send = (value) => {
     if (control && control.readyState === WebSocket.OPEN) {
@@ -49,6 +51,11 @@ const PAGE_SOURCE = String.raw`<!doctype html>
         if (message.type === 'answer' && peerConnection) {
           await peerConnection.setRemoteDescription({ type: 'answer', sdp: message.sdp });
           send({ type: 'answer-set' });
+        }
+        if (message.type === 'local-output') {
+          const gain = message.enabled === true ? 1 : 0;
+          if (inputMonitorGain) inputMonitorGain.gain.value = gain;
+          if (remoteMonitorGain) remoteMonitorGain.gain.value = gain;
         }
         if (message.type === 'close') {
           window.close();
@@ -104,7 +111,10 @@ const PAGE_SOURCE = String.raw`<!doctype html>
     const destination = inputContext.createMediaStreamDestination();
     inputNode = new AudioWorkletNode(inputContext, 'codex-commander-input', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [1] });
     inputNode.connect(destination);
-    inputNode.connect(inputContext.destination);
+    inputMonitorGain = inputContext.createGain();
+    inputMonitorGain.gain.value = 0;
+    inputNode.connect(inputMonitorGain);
+    inputMonitorGain.connect(inputContext.destination);
 
     peerConnection = new RTCPeerConnection();
     const events = peerConnection.createDataChannel('oai-events');
@@ -135,7 +145,10 @@ const PAGE_SOURCE = String.raw`<!doctype html>
           control.send(output.buffer);
         };
         source.connect(processor);
-        processor.connect(remoteContext.destination);
+        remoteMonitorGain = remoteContext.createGain();
+        remoteMonitorGain.gain.value = 0;
+        processor.connect(remoteMonitorGain);
+        remoteMonitorGain.connect(remoteContext.destination);
         send({ type: 'remote-sample-rate', sampleRate: remoteContext.sampleRate });
         send({ type: 'remote-track' });
       } catch (error) {
@@ -183,9 +196,16 @@ export class ChromiumRealtimeSession extends EventEmitter {
   private resolveStart?: () => void;
   private rejectStart?: (error: Error) => void;
 
-  public constructor(private readonly host: ChromiumRealtimeHost, private readonly logger: any) {
+  public constructor(
+    private readonly host: ChromiumRealtimeHost,
+    private readonly logger: any,
+    localAudioOutput = false
+  ) {
     super();
+    this.localAudioOutput = localAudioOutput;
   }
+
+  private localAudioOutput = false;
 
   public async start(threadId: string): Promise<void> {
     await this.close();
@@ -222,6 +242,11 @@ export class ChromiumRealtimeSession extends EventEmitter {
       return;
     }
     this.socket.send(audio);
+  }
+
+  public setLocalAudioOutput(enabled: boolean): void {
+    this.localAudioOutput = enabled;
+    this.sendJson({ type: 'local-output', enabled });
   }
 
   public handleNotification(notification: unknown): void {
@@ -350,6 +375,7 @@ export class ChromiumRealtimeSession extends EventEmitter {
       const sdp = this.pendingSdp;
       this.sendJson({ type: 'answer', sdp });
     }
+    this.sendJson({ type: 'local-output', enabled: this.localAudioOutput });
   }
 
   private onPageMessage(text: string): void {

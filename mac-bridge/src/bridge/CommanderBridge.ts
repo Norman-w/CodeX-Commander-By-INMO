@@ -39,12 +39,14 @@ export class CommanderBridge {
   private readonly sessions = new Map<string, ClientSession>();
   private audioResponseActive = false;
   private ready = false;
+  private localAudioOutput: boolean;
 
   constructor(
     private readonly config: BridgeConfig,
     mediaOutputRoot: string,
     private readonly logger: Logger
   ) {
+    this.localAudioOutput = config.audio.localOutput;
     this.pairing = new PairingStore(config.pairingFile);
     this.codex = new CodexController(config, logger);
     this.images = new ImageService(config.mediaRoots, mediaOutputRoot);
@@ -125,6 +127,12 @@ export class CommanderBridge {
   isReady(): boolean { return this.ready; }
   getPairingSnapshot(): PairingSnapshot { return this.pairing.snapshot(); }
   validateMediaToken(deviceId: string, token: string): boolean { return this.pairing.isTokenValid(deviceId, token); }
+  getLocalAudioOutput(): boolean { return this.localAudioOutput; }
+  setLocalAudioOutput(enabled: boolean): void {
+    this.localAudioOutput = enabled;
+    this.voice.setLocalAudioOutput?.(enabled);
+    this.logger.info("Mac local audio output updated", { enabled });
+  }
 
   async resetPairing(): Promise<PairingSnapshot> {
     if ([...this.sessions.values()].some((session) => session.pttActive)) this.voice.abortInput();

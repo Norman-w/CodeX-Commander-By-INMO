@@ -20,6 +20,7 @@ const EnvSchema = z.object({
   COMMANDER_REALTIME_MODEL: z.string().min(1).default("gpt-realtime-2.1-mini"),
   COMMANDER_REALTIME_VOICE: z.string().min(1).default("marin"),
   COMMANDER_REALTIME_IDLE_MS: z.coerce.number().int().min(10_000).max(600_000).default(60_000),
+  COMMANDER_LOCAL_AUDIO_OUTPUT: z.enum(["visor_only", "mac_and_visor"]).default("visor_only"),
   COMMANDER_CODEX_BIN: z.string().min(1).default("codex"),
   COMMANDER_THREAD_ID: z.string().uuid().or(z.literal("")).default(""),
   COMMANDER_CONTEXT_BINDING_ID: z.string().uuid().or(z.literal("")).default(""),
@@ -65,6 +66,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
       model: parsed.COMMANDER_REALTIME_MODEL,
       voice: parsed.COMMANDER_REALTIME_VOICE,
       idleMs: parsed.COMMANDER_REALTIME_IDLE_MS
+    },
+    audio: {
+      localOutput: parsed.COMMANDER_LOCAL_AUDIO_OUTPUT === "mac_and_visor"
     },
     codex: {
       bin: parsed.COMMANDER_CODEX_BIN,

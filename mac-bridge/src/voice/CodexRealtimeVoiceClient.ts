@@ -57,7 +57,8 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
 
   constructor(
     private readonly host: CodexRealtimeHost,
-    private readonly logger: Logger
+    private readonly logger: Logger,
+    localAudioOutput = false
   ) {
     super();
     this.orchestrator = new RealtimeSessionOrchestrator({
@@ -65,7 +66,7 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
       appendSpeech: (text) => this.speakSummary(text),
       restartSession: () => this.restartSession()
     });
-    this.chromiumSession = new ChromiumRealtimeSession(host, logger);
+    this.chromiumSession = new ChromiumRealtimeSession(host, logger, localAudioOutput);
     this.chromiumSession.on("audio", (pcm: Buffer) => {
       this.onOutputAudio({
         data: pcm.toString("base64"),
@@ -79,6 +80,10 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
 
   isConfigured(): boolean {
     return true;
+  }
+
+  setLocalAudioOutput(enabled: boolean): void {
+    this.chromiumSession.setLocalAudioOutput(enabled);
   }
 
   async probeRealtime(): Promise<void> {
