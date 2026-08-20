@@ -4,6 +4,8 @@ import type {
   ServerControlMessage
 } from "@codex-commander/protocol";
 import { CLIENT_AUDIO_FRAME, decodeBinaryFrame, encodeBinaryFrame, SERVER_AUDIO_FRAME } from "@codex-commander/protocol";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 
 import type { AudioInputSource, BridgeConfig, LocalAudioOutput } from "../config.js";
 import { CodexController } from "../codex/CodexController.js";
@@ -47,6 +49,9 @@ export class CommanderBridge {
   private inputLevelAt = 0;
   private outputLevelAt = 0;
   private diagnosticInputActive = false;
+  private voiceChatActive = false;
+  private voiceChatPhase: "starting" | "connected" | "stopping" | "stopped" | "error" = "stopped";
+  private voiceChatError?: string;
   private audioInputDeviceLabel?: string;
 
   constructor(
@@ -122,6 +127,11 @@ export class CommanderBridge {
     this.voice.on("error", (error: Error) => {
       this.broadcast(this.journal.create({ type: "assistant_audio_end" }, false));
       this.audioResponseActive = false;
+      if (!(error instanceof VoiceClientError) || error.code === "realtime_unavailable" || error.code === "realtime_error") {
+        this.voiceChatActive = false;
+        this.voiceChatPhase = "error";
+        this.voiceChatError = error.message;
+      }
       this.broadcastError(error instanceof VoiceClientError ? error.code : "realtime_error", error.message, true);
     });
   }
@@ -132,10 +142,17 @@ export class CommanderBridge {
       throw new Error("语音引擎未配置；Core realtime 需要可用的 Codex app-server");
     }
     await this.codex.start();
+    this.voiceChatPhase = "starting";
     try {
       await this.voice.probeRealtime();
+      this.voiceChatActive = true;
+      this.voiceChatPhase = "connected";
+      this.voiceChatError = undefined;
       this.logger.info("Core realtime session ready");
     } catch (error) {
+      this.voiceChatActive = false;
+      this.voiceChatPhase = "error";
+      this.voiceChatError = error instanceof Error ? error.message : String(error);
       await this.codex.stop().catch(() => undefined);
       throw error;
     }
@@ -146,6 +163,8 @@ export class CommanderBridge {
   async stop(): Promise<void> {
     this.ready = false;
     this.diagnosticInputActive = false;
+    this.voiceChatActive = false;
+    this.voiceChatPhase = "stopped";
     this.voice.close();
     for (const session of this.sessions.values()) session.transport.close(1001, "bridge stopping");
     this.sessions.clear();
@@ -163,6 +182,9 @@ export class CommanderBridge {
       audioInputSource: this.audioInputSource,
       audioInputDevice: this.audioInputDeviceLabel || null,
       localAudioOutput: this.localAudioOutput,
+      voiceChatActive: this.voiceChatActive,
+      voiceChatPhase: this.voiceChatPhase,
+      voiceChatError: this.voiceChatError || null,
       testActive: this.diagnosticInputActive,
       visorConnected: [...this.sessions.values()].some((session) => session.authenticated),
       input: now - this.inputLevelAt < 600 ? this.inputLevel : { rms: 0, peak: 0, active: false },
@@ -186,7 +208,50 @@ export class CommanderBridge {
     this.logger.info("Audio output mode updated", { output });
   }
 
+  async startVoiceChat(): Promise<void> {
+    if (this.voiceChatActive) return;
+    if (!this.voice.startSession) {
+      throw new BridgeError("voice_control_unavailable", "当前 Voice Chat 客户端不支持启动控制", true);
+    }
+    this.voiceChatPhase = "starting";
+    this.voiceChatError = undefined;
+    try {
+      await this.voice.startSession();
+      this.voiceChatActive = true;
+      this.voiceChatPhase = "connected";
+      this.logger.info("Voice Chat master switch started");
+    } catch (error) {
+      this.voiceChatActive = false;
+      this.voiceChatPhase = "error";
+      this.voiceChatError = error instanceof Error ? error.message : String(error);
+      throw error;
+    }
+  }
+
+  async stopVoiceChat(): Promise<void> {
+    if (!this.voiceChatActive && this.voiceChatPhase === "stopped") return;
+    if (!this.voice.stopSession) {
+      throw new BridgeError("voice_control_unavailable", "当前 Voice Chat 客户端不支持挂断控制", true);
+    }
+    this.voiceChatPhase = "stopping";
+    this.voiceChatError = undefined;
+    try {
+      await this.voice.stopSession();
+      this.voiceChatActive = false;
+      this.voiceChatPhase = "stopped";
+      this.diagnosticInputActive = false;
+      this.logger.info("Voice Chat master switch stopped");
+    } catch (error) {
+      this.voiceChatPhase = "error";
+      this.voiceChatError = error instanceof Error ? error.message : String(error);
+      throw error;
+    }
+  }
+
   async startAudioTest(): Promise<void> {
+    if (!this.voiceChatActive) {
+      throw new BridgeError("voice_chat_inactive", "请先启动 Voice Chat，再开始音频测试", true);
+    }
     if (this.diagnosticInputActive) return;
     if ([...this.sessions.values()].some((session) => session.pttActive)) {
       throw new BridgeError("ptt_active", "眼镜正在录音，请先结束眼镜 PTT", true);
@@ -208,6 +273,38 @@ export class CommanderBridge {
       this.diagnosticInputActive = false;
     }
     this.logger.info("Audio diagnostic test stopped");
+  }
+
+  async sendAudioTestSample(): Promise<void> {
+    if (!this.voiceChatActive) {
+      throw new BridgeError("voice_chat_inactive", "请先启动 Voice Chat，再发送测试音频", true);
+    }
+    if (this.diagnosticInputActive) throw new BridgeError("audio_test_active", "音频测试已经在进行", true);
+    if ([...this.sessions.values()].some((session) => session.pttActive)) {
+      throw new BridgeError("ptt_active", "眼镜正在录音，请先结束眼镜 PTT", true);
+    }
+    if (!this.voice.setAudioInputSource || !this.voice.setInputActive) {
+      throw new BridgeError("audio_test_unavailable", "当前语音客户端不支持可切换音频输入", true);
+    }
+
+    const audio = padProbeAudio(parseProbeWav(await readFile(PROBE_AUDIO_PATH)));
+    this.voice.setAudioInputSource(this.audioInputSource);
+    await this.voice.beginInput();
+    this.diagnosticInputActive = true;
+    this.logger.info("Audio probe sample started", { input: this.audioInputSource, bytes: audio.byteLength });
+    try {
+      for (let offset = 0; offset < audio.byteLength; offset += PROBE_FRAME_BYTES) {
+        const frame = audio.subarray(offset, Math.min(offset + PROBE_FRAME_BYTES, audio.byteLength));
+        this.inputLevel = measurePcm16(frame);
+        this.inputLevelAt = Date.now();
+        this.voice.appendInput(frame);
+        await delay(Math.max(1, Math.round(frame.byteLength / 48)));
+      }
+      await this.voice.endInput();
+    } finally {
+      this.diagnosticInputActive = false;
+    }
+    this.logger.info("Audio probe sample stopped");
   }
 
   async resetPairing(): Promise<PairingSnapshot> {
@@ -415,3 +512,53 @@ export class BridgeError extends Error {
 }
 
 const MAX_AUDIO_FRAME_BYTES = 64 * 1024;
+const PROBE_AUDIO_PATH = fileURLToPath(new URL("../../data/probe-hi-there-24k-mono.wav", import.meta.url));
+const PROBE_FRAME_BYTES = 24_000 * 2 * 40 / 1_000;
+
+async function delay(milliseconds: number): Promise<void> {
+  await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, milliseconds));
+}
+
+function parseProbeWav(buffer: Buffer): Uint8Array {
+  if (buffer.byteLength < 12 || buffer.toString("ascii", 0, 4) !== "RIFF" || buffer.toString("ascii", 8, 12) !== "WAVE") {
+    throw new Error("probe hi there 音频不是有效 WAV");
+  }
+  let format: { audioFormat: number; channels: number; sampleRate: number; bitsPerSample: number } | undefined;
+  let audio: Uint8Array | undefined;
+  for (let offset = 12; offset + 8 <= buffer.byteLength;) {
+    const chunkId = buffer.toString("ascii", offset, offset + 4);
+    const chunkSize = buffer.readUInt32LE(offset + 4);
+    const chunkStart = offset + 8;
+    const chunkEnd = chunkStart + chunkSize;
+    if (chunkEnd > buffer.byteLength) throw new Error("probe hi there WAV 数据不完整");
+    if (chunkId === "fmt " && chunkSize >= 16) {
+      format = {
+        audioFormat: buffer.readUInt16LE(chunkStart),
+        channels: buffer.readUInt16LE(chunkStart + 2),
+        sampleRate: buffer.readUInt32LE(chunkStart + 4),
+        bitsPerSample: buffer.readUInt16LE(chunkStart + 14)
+      };
+    } else if (chunkId === "data") {
+      audio = buffer.subarray(chunkStart, chunkEnd);
+    }
+    offset = chunkEnd + (chunkSize % 2);
+  }
+  if (!format || format.audioFormat !== 1 || format.channels !== 1 || format.sampleRate !== 24_000 || format.bitsPerSample !== 16) {
+    throw new Error("probe hi there WAV 必须是 24 kHz 单声道 PCM16");
+  }
+  if (!audio?.byteLength) throw new Error("probe hi there WAV 没有音频数据");
+  return audio;
+}
+
+function padProbeAudio(audio: Uint8Array): Buffer {
+  const bytesPerMs = 24_000 * 2 / 1_000;
+  const minimumBytes = Math.floor(600 * bytesPerMs);
+  const body = audio.byteLength < minimumBytes
+    ? Buffer.concat([Buffer.from(audio), Buffer.alloc(minimumBytes - audio.byteLength)])
+    : Buffer.from(audio);
+  return Buffer.concat([
+    Buffer.alloc(Math.floor(200 * bytesPerMs)),
+    body,
+    Buffer.alloc(Math.floor(200 * bytesPerMs))
+  ]);
+}

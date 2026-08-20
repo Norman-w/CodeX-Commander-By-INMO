@@ -46,9 +46,9 @@ const PAGE_SOURCE = String.raw`<!doctype html>
   };
 
   const applyInputRouting = () => {
-    if (inputRouteGain) inputRouteGain.gain.value = inputActive && inputSource === 'visor' ? 1 : 0;
+    if (inputRouteGain) inputRouteGain.gain.value = inputActive && (inputSource === 'visor' || inputSource === 'mac') ? 1 : 0;
     if (microphoneRouteGain) microphoneRouteGain.gain.value = inputActive && inputSource === 'mac' ? 1 : 0;
-    if (inputMeterVisorGain) inputMeterVisorGain.gain.value = inputSource === 'visor' ? 1 : 0;
+    if (inputMeterVisorGain) inputMeterVisorGain.gain.value = inputSource === 'visor' || inputSource === 'mac' ? 1 : 0;
     if (inputMeterMicGain) inputMeterMicGain.gain.value = inputSource === 'mac' ? 1 : 0;
   };
 
@@ -89,7 +89,7 @@ const PAGE_SOURCE = String.raw`<!doctype html>
 
   const setInputSource = async (value) => {
     inputSource = value === 'mac' ? 'mac' : 'visor';
-    if (inputSource === 'mac') await ensureMicrophone();
+    if (inputSource === 'mac') send({ type: 'microphone-device', label: '等待 macOS AVFoundation 麦克风' });
     applyInputRouting();
     send({ type: 'input-source', source: inputSource });
   };
@@ -130,6 +130,9 @@ const PAGE_SOURCE = String.raw`<!doctype html>
         }
         if (message.type === 'input-source') {
           await setInputSource(message.source);
+        }
+        if (message.type === 'microphone-device') {
+          microphoneDeviceLabel = typeof message.label === 'string' ? message.label : '';
         }
         if (message.type === 'input-active') {
           inputActive = message.active === true;
@@ -222,7 +225,21 @@ const PAGE_SOURCE = String.raw`<!doctype html>
         device: microphoneDeviceLabel,
       });
     }, 100);
-    if (inputSource === 'mac') await ensureMicrophone();
+    setInterval(async () => {
+      try {
+        if (!peerConnection) return;
+        const reports = await peerConnection.getStats();
+        for (const report of reports) {
+          if (report.type === 'outbound-rtp' && report.kind === 'audio') {
+            send({ type: 'input-stats', bytesSent: report.bytesSent, packetsSent: report.packetsSent });
+            break;
+          }
+        }
+      } catch {
+        // Stats are diagnostic only.
+      }
+    }, 500);
+    if (inputSource === 'mac') send({ type: 'microphone-device', label: '等待 macOS AVFoundation 麦克风' });
 
     peerConnection = new RTCPeerConnection();
     const events = peerConnection.createDataChannel('oai-events');
@@ -377,6 +394,10 @@ export class ChromiumRealtimeSession extends EventEmitter {
     this.sendJson({ type: 'input-active', active });
   }
 
+  public commitInput(): void {
+    this.sendJson({ type: 'commit-input' });
+  }
+
   public handleNotification(notification: unknown): void {
     const record = asRecord(notification);
     if (record?.method !== 'thread/realtime/sdp') return;
@@ -461,7 +482,11 @@ export class ChromiumRealtimeSession extends EventEmitter {
     this.profileDir = profileDir;
     const chromePath = findChrome();
     const args = [
-      '--headless=new',
+      '--start-minimized',
+      '--window-position=-10000,-10000',
+      '--disable-background-timer-throttling',
+      '--disable-renderer-backgrounding',
+      '--disable-backgrounding-occluded-windows',
       '--disable-gpu',
       '--disable-dev-shm-usage',
       '--disable-background-networking',
@@ -531,6 +556,19 @@ export class ChromiumRealtimeSession extends EventEmitter {
       this.logger?.info?.('Chromium realtime remote audio track received');
       return;
     }
+    if (type === 'event') {
+      const value = typeof message.value === 'string' ? message.value : '';
+      try {
+        const event = JSON.parse(value) as { type?: unknown; error?: { message?: unknown } };
+        const eventType = typeof event.type === 'string' ? event.type : '';
+        if (eventType === 'input_audio_buffer.committed' || eventType === 'response.created' || eventType === 'response.done' || eventType === 'error') {
+          this.logger?.info?.('Codex realtime data-channel event', { type: eventType, message: typeof event.error?.message === 'string' ? event.error.message : undefined });
+        }
+      } catch {
+        this.logger?.warn?.('Codex realtime data-channel event was not JSON');
+      }
+      return;
+    }
     if (type === 'microphone-device') {
       const label = typeof message.label === 'string' && message.label ? message.label : '电脑默认麦克风';
       this.logger?.info?.('Chromium realtime microphone selected', { label });
@@ -542,6 +580,13 @@ export class ChromiumRealtimeSession extends EventEmitter {
         rms: clampLevel(message.rms),
         peak: clampLevel(message.peak),
         active: message.active === true,
+      });
+      return;
+    }
+    if (type === 'input-stats') {
+      this.logger?.info?.('Chromium realtime input RTP stats', {
+        bytesSent: typeof message.bytesSent === 'number' ? message.bytesSent : 0,
+        packetsSent: typeof message.packetsSent === 'number' ? message.packetsSent : 0,
       });
       return;
     }

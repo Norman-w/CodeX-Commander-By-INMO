@@ -104,7 +104,7 @@ export class HttpWsServer {
 
   private async handleHttp(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
-    if (url.pathname === "/" || url.pathname === "/api/settings" || url.pathname === "/api/audio-levels" || url.pathname === "/api/audio-test/start" || url.pathname === "/api/audio-test/stop") {
+    if (url.pathname === "/" || url.pathname === "/api/settings" || url.pathname === "/api/audio-levels" || url.pathname === "/api/voice-chat/start" || url.pathname === "/api/voice-chat/stop" || url.pathname === "/api/audio-test/start" || url.pathname === "/api/audio-test/stop" || url.pathname === "/api/audio-test/sample") {
       if (!isLocalRequest(request)) return json(response, 403, { error: "management page is local-only" });
       if (request.method === "GET" && url.pathname === "/") return html(response, MANAGEMENT_PAGE);
       if (request.method === "GET" && url.pathname === "/api/settings") {
@@ -117,6 +117,14 @@ export class HttpWsServer {
       }
       if (request.method === "GET" && url.pathname === "/api/audio-levels") {
         return json(response, 200, this.bridge.getAudioDiagnostics());
+      }
+      if (request.method === "POST" && url.pathname === "/api/voice-chat/start") {
+        await this.bridge.startVoiceChat();
+        return json(response, 200, { ok: true, ...this.bridge.getAudioDiagnostics() });
+      }
+      if (request.method === "POST" && url.pathname === "/api/voice-chat/stop") {
+        await this.bridge.stopVoiceChat();
+        return json(response, 200, { ok: true, ...this.bridge.getAudioDiagnostics() });
       }
       if (request.method === "PUT" && url.pathname === "/api/settings") {
         const payload = await readJson(request);
@@ -146,6 +154,10 @@ export class HttpWsServer {
       }
       if (request.method === "POST" && url.pathname === "/api/audio-test/stop") {
         await this.bridge.stopAudioTest();
+        return json(response, 200, { ok: true, ...this.bridge.getAudioDiagnostics() });
+      }
+      if (request.method === "POST" && url.pathname === "/api/audio-test/sample") {
+        await this.bridge.sendAudioTestSample();
         return json(response, 200, { ok: true, ...this.bridge.getAudioDiagnostics() });
       }
       return json(response, 405, { error: "method not allowed" });
@@ -261,6 +273,10 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     .fill { width: 0%; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #36c7ff, #67e5c6, #ffd166); transition: width .12s linear; }
     .values { display: flex; justify-content: space-between; color: #96b4bc; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
     .action { display: grid; grid-template-columns: minmax(0, 1fr) 220px; align-items: end; gap: 18px; }
+    .voice-control { display: flex; align-items: center; justify-content: space-between; gap: 24px; border-color: rgba(255, 204, 128, .36); background: linear-gradient(120deg, rgba(255, 204, 128, .13), rgba(255, 255, 255, .04)); }
+    .voice-state { margin-top: 10px; color: #ffd28a; font-size: 17px; font-weight: 700; }
+    button.primary { min-width: 168px; border-color: rgba(255, 204, 128, .65); background: #ffcc80; color: #24190b; }
+    .actions { display: grid; gap: 10px; }
     #status { min-height: 22px; color: #70e6b0; }
     .hint { color: #8caab2; font-size: 13px; }
     code { color: #79def5; }
@@ -280,12 +296,16 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
       <div class="meter"><div class="meter-head"><div class="meter-title">输入电平</div><div id="inputStatus" class="meter-status">未采集</div></div><div class="bar"><div id="inputFill" class="fill"></div></div><div class="values"><span id="inputRms">RMS 0.000</span><span id="inputPeak">Peak 0.000</span></div></div>
       <div class="meter"><div class="meter-head"><div class="meter-title">服务器返回电平</div><div id="outputStatus" class="meter-status">未收到</div></div><div class="bar"><div id="outputFill" class="fill"></div></div><div class="values"><span id="outputRms">RMS 0.000</span><span id="outputPeak">Peak 0.000</span></div></div>
     </section>
-    <section class="panel action"><div><div id="status">正在读取 Bridge 状态...</div><div class="hint">测试期间请直接对电脑麦克风说话；结束后点击停止，避免持续占用麦克风。</div></div><button id="testButton" type="button">开始音频测试</button></section>
+    <section class="panel voice-control"><div><div class="eyebrow">VOICE CHAT 总控</div><h2>会话生命周期</h2><div class="voice-state" id="voiceChatStatus">正在读取 Voice Chat 状态...</div><div class="hint">先启动会话，再测试输入和服务器返回；挂断后所有测试按钮都会锁定。</div></div><button id="voiceChatButton" class="primary" type="button">启动 Voice Chat</button></section>
+    <section class="panel action"><div><div id="status">正在读取 Bridge 状态...</div><div class="hint">先用已生成的 hi there 音频验证服务器返回；电脑麦克风录音随后接入。</div></div><div class="actions"><button id="sampleButton" type="button">发送测试 hi there</button><button id="testButton" type="button">开始音频测试</button></div></section>
     <p class="hint">管理页只允许从本机访问。当前设置只作用于运行中的 Bridge，重启后回到环境变量默认值。</p>
   </main>
   <script>
     const inputControl = document.querySelector('#audioInput');
     const outputControl = document.querySelector('#localAudio');
+    const voiceChatButton = document.querySelector('#voiceChatButton');
+    const voiceChatStatus = document.querySelector('#voiceChatStatus');
+    const sampleButton = document.querySelector('#sampleButton');
     const testButton = document.querySelector('#testButton');
     const status = document.querySelector('#status');
     const inputFill = document.querySelector('#inputFill');
@@ -297,6 +317,7 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     const inputStatus = document.querySelector('#inputStatus');
     const outputStatus = document.querySelector('#outputStatus');
     let testActive = false;
+    let voiceChatActive = false;
     const outputLabels = { visor_only: '仅眼镜', mac_only: '仅电脑', mac_and_visor: '电脑 + 眼镜' };
     const inputLabels = { visor: '眼镜麦克风', mac: '电脑麦克风' };
     const clamp = (value) => Math.max(0, Math.min(1, Number(value) || 0));
@@ -304,6 +325,12 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     const updateMeters = (value) => {
       const input = value.input || {};
       const output = value.output || {};
+      voiceChatActive = value.voiceChatActive === true;
+      const phase = value.voiceChatPhase || (voiceChatActive ? 'connected' : 'stopped');
+      const phaseLabels = { starting: '正在启动 Voice Chat...', connected: 'Voice Chat 已连接，可以开始测试', stopping: '正在挂断 Voice Chat...', stopped: 'Voice Chat 已挂断', error: 'Voice Chat 失败' + (value.voiceChatError ? '：' + value.voiceChatError : '') };
+      voiceChatStatus.textContent = phaseLabels[phase] || phase;
+      voiceChatButton.textContent = voiceChatActive ? '挂断 Voice Chat' : '启动 Voice Chat';
+      voiceChatButton.disabled = phase === 'starting' || phase === 'stopping';
       inputFill.style.width = meterWidth(input) + '%';
       outputFill.style.width = meterWidth(output) + '%';
       inputRms.textContent = 'RMS ' + clamp(input.rms).toFixed(3);
@@ -313,6 +340,8 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
       inputStatus.textContent = input.active ? '有声音' : (value.testActive ? '等待输入' : '未采集');
       outputStatus.textContent = output.active ? '已收到返回' : '未收到返回';
       testActive = value.testActive === true;
+      sampleButton.disabled = !voiceChatActive || testActive;
+      testButton.disabled = !voiceChatActive && !testActive;
       testButton.dataset.active = String(testActive);
       testButton.textContent = testActive ? '停止音频测试' : '开始音频测试';
       if (value.audioInputDevice) {
@@ -341,6 +370,35 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     }
     inputControl.addEventListener('change', () => saveSettings().catch((error) => { status.textContent = error.message; }));
     outputControl.addEventListener('change', () => saveSettings().catch((error) => { status.textContent = error.message; }));
+    voiceChatButton.addEventListener('click', async () => {
+      const starting = !voiceChatActive;
+      voiceChatButton.disabled = true;
+      voiceChatStatus.textContent = starting ? '正在启动 Voice Chat...' : '正在挂断 Voice Chat...';
+      try {
+        const response = await fetch(starting ? '/api/voice-chat/start' : '/api/voice-chat/stop', { method: 'POST' });
+        const value = await response.json();
+        if (!response.ok) throw new Error(value.error || 'Voice Chat 控制失败');
+        updateMeters(value);
+      } catch (error) {
+        voiceChatStatus.textContent = error.message || String(error);
+        await poll();
+      }
+    });
+    sampleButton.addEventListener('click', async () => {
+      sampleButton.disabled = true;
+      status.textContent = '正在发送已生成的 hi there 音频...';
+      try {
+        const response = await fetch('/api/audio-test/sample', { method: 'POST' });
+        const value = await response.json();
+        if (!response.ok) throw new Error(value.error || '测试音频发送失败');
+        updateMeters(value);
+        status.textContent = 'hi there 音频已送入当前 Voice Chat，等待服务器原生返回...';
+      } catch (error) {
+        status.textContent = error.message || String(error);
+      } finally {
+        sampleButton.disabled = false;
+      }
+    });
     testButton.addEventListener('click', async () => {
       testButton.disabled = true;
       const starting = !testActive;

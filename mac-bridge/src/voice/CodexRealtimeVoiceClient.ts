@@ -108,12 +108,31 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
 
   async probeRealtime(): Promise<void> {
     await this.ensureSession();
-    if (this.threadId) {
-      await this.host.requestJsonRpc("thread/realtime/stop", { threadId: this.threadId }).catch(() => undefined);
-    }
-    await this.chromiumSession.close();
+    this.orchestrator.markActive();
+  }
+
+  async startSession(): Promise<void> {
+    await this.ensureSession();
+    this.orchestrator.markActive();
+  }
+
+  async stopSession(): Promise<void> {
+    this.abortInput();
+    this.clearWaitingForReply();
+    this.finishOutput();
+
+    const threadId = this.threadId;
     this.sessionActive = false;
     this.orchestrator.markIdle();
+    if (threadId) {
+      await this.host.requestJsonRpc("thread/realtime/stop", { threadId }).catch((error) => {
+        this.logger.warn("Codex realtime stop request failed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    }
+    await this.chromiumSession.close();
+    this.logger.info("Codex realtime session stopped by Voice Chat master switch");
   }
 
   async beginInput(): Promise<void> {
@@ -123,6 +142,7 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
     this.inputHadSignal = false;
     this.outputAudioFrames = 0;
     this.pending.length = 0;
+    this.appendChain = Promise.resolve();
     this.inputItemId = crypto.randomUUID();
     this.captions.beginUserTurn();
     await this.ensureSession();
@@ -145,25 +165,31 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
   async endInput(): Promise<void> {
     if (!this.inputStarted) throw new VoiceClientError("ptt_not_active", "当前没有正在录音的语音");
     this.inputStarted = false;
-    this.chromiumSession.setInputActive(false);
-    await this.appendChain.catch(() => undefined);
-    if (this.inputBytes < MIN_INPUT_AUDIO_BYTES && !this.inputHadSignal) {
-      this.inputItemId = null;
-      throw new VoiceClientError("ptt_too_short", "说话时间太短，请再说一次");
-    }
-    if (!this.sessionActive) {
-      throw new VoiceClientError("realtime_unavailable", voiceUnavailableMessage(this.sessionFailure));
-    }
-    this.enqueueAppend(silenceFrame(END_SILENCE_MS));
-    await this.appendChain.catch(async (error) => {
-      await this.orchestrator.recoverFromAppendFailure().catch(() => undefined);
+    try {
+      await this.appendChain.catch(() => undefined);
+      if (this.inputBytes < MIN_INPUT_AUDIO_BYTES && !this.inputHadSignal) {
+        this.inputItemId = null;
+        throw new VoiceClientError("ptt_too_short", "说话时间太短，请再说一次");
+      }
+      if (!this.sessionActive) {
+        throw new VoiceClientError("realtime_unavailable", voiceUnavailableMessage(this.sessionFailure));
+      }
+      this.enqueueAppend(silenceFrame(END_SILENCE_MS));
+      await this.appendChain.catch(async (error) => {
+        await this.orchestrator.recoverFromAppendFailure().catch(() => undefined);
+        throw error;
+      });
+      await wait(END_SILENCE_MS);
+      this.chromiumSession.setInputActive(false);
+      if (!this.sessionActive) {
+        throw new VoiceClientError("realtime_unavailable", voiceUnavailableMessage(this.sessionFailure));
+      }
+      this.armReplyTimeout();
+      this.logger.info("Codex Voice Chat PTT ended; waiting for reply");
+    } catch (error) {
+      this.chromiumSession.setInputActive(false);
       throw error;
-    });
-    if (!this.sessionActive) {
-      throw new VoiceClientError("realtime_unavailable", voiceUnavailableMessage(this.sessionFailure));
     }
-    this.armReplyTimeout();
-    this.logger.info("Codex Voice Chat PTT ended; waiting for reply");
   }
 
   abortInput(): void {
@@ -413,6 +439,10 @@ function hasAudibleSignal(pcm: Buffer): boolean {
 function silenceFrame(durationMs: number): Buffer {
   const samples = Math.max(1, Math.floor((AUDIO_SAMPLE_RATE * durationMs) / 1_000));
   return Buffer.alloc(samples * 2);
+}
+
+async function wait(milliseconds: number): Promise<void> {
+  await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, milliseconds));
 }
 
 function firstText(...values: unknown[]): string | undefined {

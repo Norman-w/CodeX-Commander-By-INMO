@@ -9,6 +9,8 @@ import type { AudioLevel } from "./AudioDiagnostics.js";
 export type CommanderVoice = {
   isConfigured(): boolean;
   probeRealtime(): Promise<void>;
+  startSession?(): Promise<void>;
+  stopSession?(): Promise<void>;
   beginInput(): Promise<void>;
   appendInput(pcm16le: Uint8Array): void;
   endInput(): Promise<void>;

@@ -100,10 +100,7 @@ describe("CodexRealtimeVoiceClient", () => {
     };
     const client = new CodexRealtimeVoiceClient(host, new Logger("error"));
     await client.probeRealtime();
-    expect(requests.map((item) => item.method)).toEqual([
-      "thread/realtime/start",
-      "thread/realtime/stop"
-    ]);
+    expect(requests.map((item) => item.method)).toEqual(["thread/realtime/start"]);
     client.close();
   });
 });
