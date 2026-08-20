@@ -53,6 +53,8 @@ export class CommanderBridge {
   private voiceChatPhase: "starting" | "connected" | "stopping" | "stopped" | "error" = "stopped";
   private voiceChatError?: string;
   private audioInputDeviceLabel?: string;
+  private audioInputTransport: "none" | "visor" | "management_page" | "chromium_native" = "none";
+  private managementAudioAt = 0;
 
   constructor(
     private readonly config: BridgeConfig,
@@ -105,6 +107,8 @@ export class CommanderBridge {
       this.broadcastBinary(encodeBinaryFrame(SERVER_AUDIO_FRAME, audio));
     });
     this.voice.on("inputLevel", (level: AudioLevel) => {
+      if (this.audioInputSource === "mac" && this.diagnosticInputActive && Date.now() - this.managementAudioAt < 600) return;
+      if (this.audioInputSource === "mac" && this.diagnosticInputActive && level.active === false && this.audioInputDeviceLabel?.startsWith("等待")) return;
       this.inputLevel = level;
       this.inputLevelAt = Date.now();
     });
@@ -113,7 +117,10 @@ export class CommanderBridge {
       this.outputLevelAt = Date.now();
     });
     this.voice.on("inputDevice", (label: string) => {
+      if (this.audioInputSource === "mac" && this.diagnosticInputActive && label.startsWith("等待") && this.audioInputDeviceLabel && !this.audioInputDeviceLabel.startsWith("等待")) return;
       this.audioInputDeviceLabel = label;
+      if (this.audioInputSource === "mac" && !label.startsWith("等待")) this.audioInputTransport = "chromium_native";
+      if (this.audioInputSource === "visor") this.audioInputTransport = "visor";
       this.logger.info("Audio input device selected", { label });
     });
     this.voice.on("audioEnd", (transcript: string) => {
@@ -181,6 +188,7 @@ export class CommanderBridge {
     return {
       audioInputSource: this.audioInputSource,
       audioInputDevice: this.audioInputDeviceLabel || null,
+      audioInputTransport: this.audioInputTransport,
       localAudioOutput: this.localAudioOutput,
       voiceChatActive: this.voiceChatActive,
       voiceChatPhase: this.voiceChatPhase,
@@ -194,6 +202,7 @@ export class CommanderBridge {
   setAudioInputSource(source: AudioInputSource): void {
     this.audioInputSource = source;
     this.inputLevelAt = 0;
+    this.audioInputTransport = source === "visor" ? "visor" : "none";
     this.voice.setAudioInputSource?.(source);
     this.logger.info("Audio input source updated", { source });
   }
@@ -259,9 +268,15 @@ export class CommanderBridge {
     if (!this.voice.setAudioInputSource || !this.voice.setInputActive) {
       throw new BridgeError("audio_test_unavailable", "当前语音客户端不支持可切换音频输入", true);
     }
-    this.voice.setAudioInputSource(this.audioInputSource);
-    await this.voice.beginInput();
+    this.managementAudioAt = 0;
     this.diagnosticInputActive = true;
+    this.voice.setAudioInputSource(this.audioInputSource);
+    try {
+      await this.voice.beginInput();
+    } catch (error) {
+      this.diagnosticInputActive = false;
+      throw error;
+    }
     this.logger.info("Audio diagnostic test started", { input: this.audioInputSource, output: this.localAudioOutput });
   }
 
@@ -271,8 +286,28 @@ export class CommanderBridge {
       await this.voice.endInput();
     } finally {
       this.diagnosticInputActive = false;
+      this.managementAudioAt = 0;
     }
     this.logger.info("Audio diagnostic test stopped");
+  }
+
+  setManagementAudioDevice(label: string): void {
+    const normalized = label.trim();
+    if (!normalized) return;
+    this.audioInputDeviceLabel = normalized;
+    this.audioInputTransport = "management_page";
+    this.logger.info("Management page microphone selected", { label: normalized });
+  }
+
+  handleManagementAudio(frame: Uint8Array): void {
+    if (!this.diagnosticInputActive || this.audioInputSource !== "mac") return;
+    if (frame.byteLength === 0 || frame.byteLength % 2 !== 0) return;
+    const audio = Buffer.from(frame);
+    this.inputLevel = measurePcm16(audio);
+    this.inputLevelAt = Date.now();
+    this.managementAudioAt = this.inputLevelAt;
+    this.audioInputTransport = "management_page";
+    this.voice.appendInput(audio);
   }
 
   async sendAudioTestSample(): Promise<void> {

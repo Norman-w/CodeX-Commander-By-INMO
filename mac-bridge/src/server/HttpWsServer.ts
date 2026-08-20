@@ -15,6 +15,7 @@ import type { Logger } from "../log.js";
 export class HttpWsServer {
   private readonly server: Server;
   private readonly websocket: WebSocketServer;
+  private readonly managementWebsocket: WebSocketServer;
 
   constructor(
     private readonly config: BridgeConfig,
@@ -24,13 +25,19 @@ export class HttpWsServer {
   ) {
     this.server = createServer((request, response) => {
       void this.handleHttp(request, response).catch((error) => {
-        this.logger.error("HTTP request failed", error instanceof Error ? error.message : String(error));
-        if (!response.headersSent) json(response, 500, { error: "internal error" });
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.error("HTTP request failed", message);
+        if (!response.headersSent) json(response, request.url?.startsWith("/api/") ? 400 : 500, { error: message });
         else response.destroy();
       });
     });
     this.websocket = new WebSocketServer({ noServer: true, maxPayload: 1_048_576, perMessageDeflate: false });
+    this.managementWebsocket = new WebSocketServer({ noServer: true, maxPayload: 1_048_576, perMessageDeflate: false });
     this.server.on("upgrade", (request, socket, head) => {
+      if (request.url === "/v1/management-audio" && this.originAllowed(request)) {
+        this.managementWebsocket.handleUpgrade(request, socket, head, (ws) => this.managementWebsocket.emit("connection", ws, request));
+        return;
+      }
       if (request.url !== "/v1/visor" || !this.originAllowed(request)) {
         socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
         socket.destroy();
@@ -39,6 +46,7 @@ export class HttpWsServer {
       this.websocket.handleUpgrade(request, socket, head, (ws) => this.websocket.emit("connection", ws, request));
     });
     this.websocket.on("connection", (ws) => this.handleSocket(ws));
+    this.managementWebsocket.on("connection", (ws) => this.handleManagementAudioSocket(ws));
   }
 
   async listen(): Promise<void> {
@@ -53,6 +61,7 @@ export class HttpWsServer {
 
   async close(): Promise<void> {
     for (const client of this.websocket.clients) client.close(1001, "server stopping");
+    for (const client of this.managementWebsocket.clients) client.close(1001, "server stopping");
     if (!this.server.listening) return;
     await new Promise<void>((resolvePromise) => this.server.close(() => resolvePromise()));
   }
@@ -99,6 +108,23 @@ export class HttpWsServer {
     ws.once("close", () => {
       clearTimeout(helloTimer);
       this.bridge.detach(id);
+    });
+  }
+
+  private handleManagementAudioSocket(ws: WebSocket): void {
+    ws.on("message", (data: RawData, isBinary) => {
+      if (!isBinary) {
+        try {
+          const value = JSON.parse(toBuffer(data).toString("utf8")) as { type?: string; label?: string };
+          if (value.type === "device" && typeof value.label === "string") {
+            this.bridge.setManagementAudioDevice(value.label);
+          }
+        } catch {
+          // Ignore malformed management control messages.
+        }
+        return;
+      }
+      this.bridge.handleManagementAudio(new Uint8Array(toBuffer(data)));
     });
   }
 
@@ -318,10 +344,80 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     const outputStatus = document.querySelector('#outputStatus');
     let testActive = false;
     let voiceChatActive = false;
+    let actionMessage = '';
+    let managementSocket = null;
+    let macCapture = null;
     const outputLabels = { visor_only: '仅眼镜', mac_only: '仅电脑', mac_and_visor: '电脑 + 眼镜' };
     const inputLabels = { visor: '眼镜麦克风', mac: '电脑麦克风' };
+    const transportLabels = { none: '未开始采集', visor: '眼镜通道', management_page: '8787 网页通道', chromium_native: 'Chromium 原生通道' };
     const clamp = (value) => Math.max(0, Math.min(1, Number(value) || 0));
     const meterWidth = (level) => Math.min(100, Math.max(0, Math.round(clamp(level.peak) * 100)));
+    const showAction = (message) => { actionMessage = message; status.textContent = message; };
+    const floatToPcm16 = (samples, sampleRate) => {
+      const outputLength = Math.max(1, Math.floor(samples.length * 24000 / sampleRate));
+      const output = new Int16Array(outputLength);
+      for (let index = 0; index < output.length; index += 1) {
+        const sourceIndex = Math.min(samples.length - 1, Math.floor(index * sampleRate / 24000));
+        const sample = Math.max(-1, Math.min(1, samples[sourceIndex] || 0));
+        output[index] = sample < 0 ? Math.round(sample * 32768) : Math.round(sample * 32767);
+      }
+      return output.buffer;
+    };
+    const openManagementSocket = () => new Promise((resolve, reject) => {
+      if (managementSocket && managementSocket.readyState === WebSocket.OPEN) return resolve(managementSocket);
+      const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
+      const socket = new WebSocket(scheme + '://' + location.host + '/v1/management-audio');
+      socket.binaryType = 'arraybuffer';
+      socket.onopen = () => { managementSocket = socket; resolve(socket); };
+      socket.onerror = () => reject(new Error('无法连接 Bridge 管理音频通道'));
+    });
+    const stopMacCapture = async () => {
+      const capture = macCapture;
+      macCapture = null;
+      if (!capture) return;
+      capture.processor.disconnect();
+      capture.source.disconnect();
+      capture.silentGain.disconnect();
+      capture.stream.getTracks().forEach((track) => track.stop());
+      if (capture.context.state !== 'closed') await capture.context.close();
+      if (capture.socket.readyState === WebSocket.OPEN) capture.socket.close(1000, 'audio test stopped');
+      if (managementSocket === capture.socket) managementSocket = null;
+    };
+    const startMacCapture = async () => {
+      if (macCapture) return;
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('当前网页环境不支持麦克风采集');
+      let requestSettled = false;
+      const mediaRequest = navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false }, video: false }).then((value) => {
+        if (requestSettled) value.getTracks().forEach((track) => track.stop());
+        return value;
+      });
+      let stream;
+      try {
+        stream = await Promise.race([mediaRequest, new Promise((_, reject) => setTimeout(() => reject(new Error('电脑麦克风权限未返回，请允许 127.0.0.1 使用麦克风后重试')), 8000))]);
+        requestSettled = true;
+      } catch (error) {
+        requestSettled = true;
+        throw error;
+      }
+      const socket = await openManagementSocket();
+      const context = new AudioContext({ latencyHint: 'interactive' });
+      await context.resume();
+      const source = context.createMediaStreamSource(stream);
+      const processor = context.createScriptProcessor(2048, 1, 1);
+      const silentGain = context.createGain();
+      silentGain.gain.value = 0;
+      const track = stream.getAudioTracks()[0];
+      const deviceLabel = track?.label || '网页麦克风';
+      macCapture = { stream, socket, context, source, processor, silentGain, deviceLabel };
+      socket.send(JSON.stringify({ type: 'device', label: deviceLabel }));
+      processor.onaudioprocess = (event) => {
+        if (!macCapture || macCapture.socket.readyState !== WebSocket.OPEN || !testActive) return;
+        macCapture.socket.send(floatToPcm16(event.inputBuffer.getChannelData(0), context.sampleRate));
+      };
+      source.connect(processor);
+      processor.connect(silentGain);
+      silentGain.connect(context.destination);
+    };
     const updateMeters = (value) => {
       const input = value.input || {};
       const output = value.output || {};
@@ -344,8 +440,8 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
       testButton.disabled = !voiceChatActive && !testActive;
       testButton.dataset.active = String(testActive);
       testButton.textContent = testActive ? '停止音频测试' : '开始音频测试';
-      if (value.audioInputDevice) {
-        status.textContent = '输入：' + (inputLabels[inputControl.value] || inputControl.value) + '（设备：' + value.audioInputDevice + '）；输出：' + (outputLabels[outputControl.value] || outputControl.value);
+      if (!actionMessage && value.audioInputDevice) {
+        showAction('输入：' + (inputLabels[inputControl.value] || inputControl.value) + '（设备：' + value.audioInputDevice + '，通道：' + (transportLabels[value.audioInputTransport] || value.audioInputTransport || '未知') + '）；输出：' + (outputLabels[outputControl.value] || outputControl.value));
       }
     };
     const updateStatus = (value) => {
@@ -368,8 +464,8 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
       if (!response.ok) throw new Error(value.error || '设置失败');
       updateStatus(value);
     }
-    inputControl.addEventListener('change', () => saveSettings().catch((error) => { status.textContent = error.message; }));
-    outputControl.addEventListener('change', () => saveSettings().catch((error) => { status.textContent = error.message; }));
+    inputControl.addEventListener('change', () => { actionMessage = ''; saveSettings().catch((error) => showAction(error.message)); });
+    outputControl.addEventListener('change', () => { actionMessage = ''; saveSettings().catch((error) => showAction(error.message)); });
     voiceChatButton.addEventListener('click', async () => {
       const starting = !voiceChatActive;
       voiceChatButton.disabled = true;
@@ -386,15 +482,15 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     });
     sampleButton.addEventListener('click', async () => {
       sampleButton.disabled = true;
-      status.textContent = '正在发送已生成的 hi there 音频...';
+      showAction('正在发送已生成的 hi there 音频...');
       try {
         const response = await fetch('/api/audio-test/sample', { method: 'POST' });
         const value = await response.json();
         if (!response.ok) throw new Error(value.error || '测试音频发送失败');
         updateMeters(value);
-        status.textContent = 'hi there 音频已送入当前 Voice Chat，等待服务器原生返回...';
+        showAction('hi there 音频已送入当前 Voice Chat，等待服务器原生返回...');
       } catch (error) {
-        status.textContent = error.message || String(error);
+        showAction(error.message || String(error));
       } finally {
         sampleButton.disabled = false;
       }
@@ -402,19 +498,35 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     testButton.addEventListener('click', async () => {
       testButton.disabled = true;
       const starting = !testActive;
+      let captureStarted = false;
       try {
+        showAction(starting && inputControl.value === 'mac' ? '正在请求电脑麦克风权限并连接管理音频通道...' : (starting ? '正在启动音频测试...' : '正在停止音频测试...'));
+        if (starting && inputControl.value === 'mac') {
+          try {
+            await startMacCapture();
+            captureStarted = true;
+          } catch (error) {
+            showAction('网页麦克风不可用（' + (error.message || String(error)) + '），改用 Chromium 原生麦克风...');
+          }
+        }
         const path = starting ? '/api/audio-test/start' : '/api/audio-test/stop';
         const response = await fetch(path, { method: 'POST' });
         const value = await response.json();
         if (!response.ok) throw new Error(value.error || '音频测试失败');
         updateMeters(value);
-        status.textContent = starting ? '音频测试已开始，请说话' : '音频测试已停止';
+        if (starting && inputControl.value === 'mac' && macCapture) {
+          macCapture.socket.send(JSON.stringify({ type: 'device', label: macCapture.deviceLabel || '网页麦克风' }));
+        }
+        showAction(starting ? '音频测试已开始，请对电脑麦克风说话' : '音频测试已停止');
       } catch (error) {
-        status.textContent = error.message || String(error);
+        if (captureStarted) await stopMacCapture().catch(() => undefined);
+        showAction(error.message || String(error));
       } finally {
-        testButton.disabled = false;
+        if (!starting) await stopMacCapture().catch(() => undefined);
+        testButton.disabled = !voiceChatActive && !testActive;
       }
     });
+    window.addEventListener('beforeunload', () => { void stopMacCapture(); });
     async function poll() {
       try { updateMeters(await (await fetch('/api/audio-levels', { cache: 'no-store' })).json()); } catch { /* bridge may be restarting */ }
     }

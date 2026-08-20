@@ -89,7 +89,10 @@ const PAGE_SOURCE = String.raw`<!doctype html>
 
   const setInputSource = async (value) => {
     inputSource = value === 'mac' ? 'mac' : 'visor';
-    if (inputSource === 'mac') send({ type: 'microphone-device', label: '等待 macOS AVFoundation 麦克风' });
+    if (inputSource === 'mac') {
+      send({ type: 'microphone-device', label: '等待 Chromium 原生麦克风' });
+      void ensureMicrophone().catch(fail);
+    }
     applyInputRouting();
     send({ type: 'input-source', source: inputSource });
   };
