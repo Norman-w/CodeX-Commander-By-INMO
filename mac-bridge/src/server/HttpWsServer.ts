@@ -322,7 +322,7 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     <h1>原生 Voice Chat 音频诊断</h1>
     <p>先选择输入和输出，再启动一次测试。这里走当前 ChatGPT 登录态与 Chromium WebRTC 原生音频，不使用 TTS。</p>
     <section class="panel routes">
-      <div class="field"><label for="audioInput">输入来源</label><select id="audioInput"><option value="visor">眼镜麦克风</option><option value="mac">电脑麦克风</option></select><div class="hint">电脑测试时选择电脑麦克风，眼镜测试时选择眼镜麦克风。</div></div>
+      <div class="field"><label for="audioInput">输入来源</label><select id="audioInput"><option value="visor">眼镜麦克风</option><option value="mac">电脑麦克风</option></select><div class="hint">开始/停止音频测试使用电脑麦克风；眼镜麦克风由眼镜 PTT 触发。</div></div>
       <div class="field"><label for="localAudio">服务器回复输出</label><select id="localAudio"><option value="visor_only">仅眼镜</option><option value="mac_only">仅电脑</option><option value="mac_and_visor">电脑 + 眼镜</option></select><div class="hint">电脑输出由 Chromium WebRTC 远端音频直接播放。</div></div>
     </section>
     <section class="panel meters">
@@ -475,12 +475,17 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
       inputPeak.textContent = 'Peak ' + clamp(input.peak).toFixed(3);
       outputRms.textContent = 'RMS ' + clamp(output.rms).toFixed(3);
       outputPeak.textContent = 'Peak ' + clamp(output.peak).toFixed(3);
-      inputStatus.textContent = input.active ? '有声音' : (value.testActive ? '等待输入' : '未采集');
+      const inputFrames = Number(value.inputFrames) || 0;
+      inputStatus.textContent = input.active
+        ? '有声音'
+        : value.testActive
+          ? (inputFrames > 0 ? '已收到输入帧，等待有效声音' : (inputControl.value === 'visor' ? '未收到眼镜音频，请使用眼镜 PTT' : '未收到电脑麦克风'))
+          : (inputFrames > 0 ? '测试已停止，已收到 ' + inputFrames + ' 帧' : '未采集');
       outputStatus.textContent = output.active ? '已收到返回' : '未收到返回';
       renderVoiceEvents(value.voiceEvents);
       testActive = value.testActive === true;
-      sampleButton.disabled = !voiceChatActive || testActive;
-      testButton.disabled = !voiceChatActive && !testActive;
+      sampleButton.disabled = !voiceChatActive || testActive || value.voiceTurnActive === true;
+      testButton.disabled = !testActive && (!voiceChatActive || value.voiceTurnActive === true);
       testButton.dataset.active = String(testActive);
       testButton.textContent = testActive ? '停止音频测试' : '开始音频测试';
       if (!actionMessage && value.audioInputDevice) {
@@ -560,7 +565,9 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
         if (starting && inputControl.value === 'mac' && macCapture) {
           macCapture.socket.send(JSON.stringify({ type: 'device', label: macCapture.deviceLabel || '网页麦克风' }));
         }
-        showAction(starting ? '音频测试已开始，请对电脑麦克风说话' : '音频测试已停止');
+        showAction(starting
+          ? (inputControl.value === 'visor' ? '音频测试已开始；本页不会启动眼镜麦克风，请改选电脑麦克风，或使用眼镜 PTT' : '音频测试已开始，请对电脑麦克风说话')
+          : '音频测试已停止');
       } catch (error) {
         if (captureStarted) await stopMacCapture().catch(() => undefined);
         showAction(error.message || String(error));

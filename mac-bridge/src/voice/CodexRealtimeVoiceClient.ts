@@ -169,9 +169,16 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
     this.inputStarted = false;
     try {
       await this.appendChain.catch(() => undefined);
+      if (this.inputBytes === 0 && !this.inputHadSignal) {
+        this.inputItemId = null;
+        throw new VoiceClientError(
+          "no_input_audio",
+          "未收到输入音频：电脑麦克风请允许权限并选择电脑麦克风，眼镜麦克风请使用眼镜 PTT"
+        );
+      }
       if (this.inputBytes < MIN_INPUT_AUDIO_BYTES && !this.inputHadSignal) {
         this.inputItemId = null;
-        throw new VoiceClientError("ptt_too_short", "说话时间太短，请再说一次");
+        throw new VoiceClientError("ptt_too_short", "收到的输入音频太短或没有有效声音，请再说一次");
       }
       if (!this.sessionActive) {
         throw new VoiceClientError("realtime_unavailable", voiceUnavailableMessage(this.sessionFailure));

@@ -9,6 +9,7 @@ export class CaptionLog {
 
   beginUserTurn(): void {
     this.user = "";
+    this.assistant = "";
   }
 
   appendDelta(role: CaptionRole, delta: string): string {

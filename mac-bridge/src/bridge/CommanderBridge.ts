@@ -49,6 +49,7 @@ export class CommanderBridge {
   private readonly imageCards: ImageCard[] = [];
   private readonly sessions = new Map<string, ClientSession>();
   private audioResponseActive = false;
+  private voiceTurnActive = false;
   private ready = false;
   private localAudioOutput: LocalAudioOutput;
   private audioInputSource: AudioInputSource;
@@ -63,6 +64,8 @@ export class CommanderBridge {
   private audioInputDeviceLabel?: string;
   private audioInputTransport: "none" | "visor" | "management_page" | "chromium_native" = "none";
   private managementAudioAt = 0;
+  private diagnosticInputFrames = 0;
+  private diagnosticInputBytes = 0;
   private voiceDiagnosticEventId = 0;
   private readonly voiceDiagnosticEvents: VoiceDiagnosticEvent[] = [];
 
@@ -135,7 +138,8 @@ export class CommanderBridge {
       this.logger.info("Audio input device selected", { label });
     });
     this.voice.on("audioEnd", (transcript: string) => {
-      if (transcript) this.recordVoiceEvent({ type: "audio_end", text: transcript });
+      this.voiceTurnActive = false;
+      this.recordVoiceEvent({ type: "audio_end" });
       if (!this.audioResponseActive) return;
       this.audioResponseActive = false;
       this.broadcast(this.journal.create({ type: "assistant_audio_end", ...(transcript ? { transcript } : {}) }, false));
@@ -145,6 +149,7 @@ export class CommanderBridge {
       this.broadcast(this.journal.create({ type: "caption", role, text }, false));
     });
     this.voice.on("error", (error: Error) => {
+      this.voiceTurnActive = false;
       this.recordVoiceEvent({ type: "error", text: error.message });
       this.broadcast(this.journal.create({ type: "assistant_audio_end" }, false));
       this.audioResponseActive = false;
@@ -184,6 +189,7 @@ export class CommanderBridge {
   async stop(): Promise<void> {
     this.ready = false;
     this.diagnosticInputActive = false;
+    this.voiceTurnActive = false;
     this.voiceChatActive = false;
     this.voiceChatPhase = "stopped";
     this.voice.close();
@@ -208,6 +214,9 @@ export class CommanderBridge {
       voiceChatPhase: this.voiceChatPhase,
       voiceChatError: this.voiceChatError || null,
       testActive: this.diagnosticInputActive,
+      voiceTurnActive: this.voiceTurnActive,
+      inputFrames: this.diagnosticInputFrames,
+      inputBytes: this.diagnosticInputBytes,
       visorConnected: [...this.sessions.values()].some((session) => session.authenticated),
       input: now - this.inputLevelAt < 600 ? this.inputLevel : { rms: 0, peak: 0, active: false },
       output: now - this.outputLevelAt < 600 ? this.outputLevel : { rms: 0, peak: 0, active: false },
@@ -277,6 +286,9 @@ export class CommanderBridge {
       throw new BridgeError("voice_chat_inactive", "请先启动 Voice Chat，再开始音频测试", true);
     }
     if (this.diagnosticInputActive) return;
+    if (this.voiceTurnActive || this.audioResponseActive) {
+      throw new BridgeError("voice_turn_active", "上一轮语音回复尚未结束，请等待原生音频结束", true);
+    }
     if ([...this.sessions.values()].some((session) => session.pttActive)) {
       throw new BridgeError("ptt_active", "眼镜正在录音，请先结束眼镜 PTT", true);
     }
@@ -285,9 +297,14 @@ export class CommanderBridge {
     }
     this.managementAudioAt = 0;
     this.diagnosticInputActive = true;
+    this.diagnosticInputFrames = 0;
+    this.diagnosticInputBytes = 0;
+    this.inputLevel = { rms: 0, peak: 0, active: false };
+    this.inputLevelAt = 0;
     this.voice.setAudioInputSource(this.audioInputSource);
     try {
       await this.voice.beginInput();
+      this.voiceTurnActive = true;
     } catch (error) {
       this.diagnosticInputActive = false;
       throw error;
@@ -299,6 +316,9 @@ export class CommanderBridge {
     if (!this.diagnosticInputActive) return;
     try {
       await this.voice.endInput();
+    } catch (error) {
+      this.voiceTurnActive = false;
+      throw error;
     } finally {
       this.diagnosticInputActive = false;
       this.managementAudioAt = 0;
@@ -322,6 +342,8 @@ export class CommanderBridge {
     this.inputLevelAt = Date.now();
     this.managementAudioAt = this.inputLevelAt;
     this.audioInputTransport = "management_page";
+    this.diagnosticInputFrames += 1;
+    this.diagnosticInputBytes += audio.byteLength;
     this.voice.appendInput(audio);
   }
 
@@ -330,6 +352,9 @@ export class CommanderBridge {
       throw new BridgeError("voice_chat_inactive", "请先启动 Voice Chat，再发送测试音频", true);
     }
     if (this.diagnosticInputActive) throw new BridgeError("audio_test_active", "音频测试已经在进行", true);
+    if (this.voiceTurnActive || this.audioResponseActive) {
+      throw new BridgeError("voice_turn_active", "上一轮语音回复尚未结束，请等待原生音频结束", true);
+    }
     if ([...this.sessions.values()].some((session) => session.pttActive)) {
       throw new BridgeError("ptt_active", "眼镜正在录音，请先结束眼镜 PTT", true);
     }
@@ -339,18 +364,27 @@ export class CommanderBridge {
 
     const audio = padProbeAudio(parseProbeWav(await readFile(PROBE_AUDIO_PATH)));
     this.voice.setAudioInputSource(this.audioInputSource);
-    await this.voice.beginInput();
     this.diagnosticInputActive = true;
-    this.logger.info("Audio probe sample started", { input: this.audioInputSource, bytes: audio.byteLength });
+    this.diagnosticInputFrames = 0;
+    this.diagnosticInputBytes = 0;
+    this.inputLevelAt = 0;
     try {
+      await this.voice.beginInput();
+      this.voiceTurnActive = true;
+    this.logger.info("Audio probe sample started", { input: this.audioInputSource, bytes: audio.byteLength });
       for (let offset = 0; offset < audio.byteLength; offset += PROBE_FRAME_BYTES) {
         const frame = audio.subarray(offset, Math.min(offset + PROBE_FRAME_BYTES, audio.byteLength));
         this.inputLevel = measurePcm16(frame);
         this.inputLevelAt = Date.now();
+        this.diagnosticInputFrames += 1;
+        this.diagnosticInputBytes += frame.byteLength;
         this.voice.appendInput(frame);
         await delay(Math.max(1, Math.round(frame.byteLength / 48)));
       }
       await this.voice.endInput();
+    } catch (error) {
+      this.voiceTurnActive = false;
+      throw error;
     } finally {
       this.diagnosticInputActive = false;
     }
@@ -459,6 +493,8 @@ export class CommanderBridge {
     if (this.audioInputSource !== "visor") return;
     this.inputLevel = measurePcm16(decoded.payload);
     this.inputLevelAt = Date.now();
+    this.diagnosticInputFrames += 1;
+    this.diagnosticInputBytes += decoded.payload.byteLength;
     this.voice.appendInput(decoded.payload);
   }
 
@@ -540,11 +576,30 @@ export class CommanderBridge {
 
   private recordVoiceEvent(event: Omit<VoiceDiagnosticEvent, "id" | "at">): void {
     const at = Date.now();
-    const previous = this.voiceDiagnosticEvents[this.voiceDiagnosticEvents.length - 1];
-    if (event.type === "caption" && previous?.type === "caption" && previous.role === event.role) {
-      previous.text = event.text;
-      previous.at = at;
-      return;
+    if (event.type === "caption" && event.role) {
+      let latestUserCaption = -1;
+      let latestAssistantCaption = -1;
+      let latestAudioEnd = -1;
+      for (let index = this.voiceDiagnosticEvents.length - 1; index >= 0; index -= 1) {
+        const previous = this.voiceDiagnosticEvents[index];
+        if (!previous) continue;
+        if (previous.type === "audio_end" && latestAudioEnd < 0) latestAudioEnd = index;
+        if (previous.type !== "caption") continue;
+        if (previous.role === "user" && latestUserCaption < 0) latestUserCaption = index;
+        if (previous.role === "assistant" && latestAssistantCaption < 0) latestAssistantCaption = index;
+        if (latestUserCaption >= 0 && latestAssistantCaption >= 0 && latestAudioEnd >= 0) break;
+      }
+      const sameRoleIndex = event.role === "user" ? latestUserCaption : latestAssistantCaption;
+      const sameTurn = event.role === "user"
+        ? latestUserCaption >= 0 && latestUserCaption > latestAudioEnd
+        : latestAssistantCaption >= 0 && latestAssistantCaption > latestUserCaption;
+      if (sameRoleIndex >= 0 && sameTurn) {
+        const previous = this.voiceDiagnosticEvents[sameRoleIndex];
+        if (!previous) return;
+        previous.text = event.text;
+        previous.at = at;
+        return;
+      }
     }
     this.voiceDiagnosticEvents.push({ id: ++this.voiceDiagnosticEventId, at, ...event });
     if (this.voiceDiagnosticEvents.length > 80) this.voiceDiagnosticEvents.splice(0, this.voiceDiagnosticEvents.length - 80);
