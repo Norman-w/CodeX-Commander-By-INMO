@@ -340,9 +340,11 @@ class CommanderController(context: Context) : BridgeClient.Listener {
                         latestSummary = if (completed) message.message else it.latestSummary,
                         completionAwaitingReport = completed,
                         lastEventId = message.eventId,
+                        playing = if (message.phase == "failed") false else it.playing,
                         error = if (message.phase == "failed") message.message else null,
                     )
                 }
+                if (message.phase == "failed") player.stop()
                 if (completed) playCompletionTone()
             }
             is ServerMessage.AudioStart -> {
@@ -424,12 +426,14 @@ class CommanderController(context: Context) : BridgeClient.Listener {
                 val friendly = HudText.friendlyError(message.code, message.message)
                 val reportFailed = pendingReport != null
                 pendingReport = null
+                player.stop()
                 update {
                     val leaveVoiceWait = it.taskPhase == "queued" || it.listening
                     it.copy(
                         connection = if (message.recoverable) it.connection else ConnectionState.ERROR,
                         setupRequired = message.code == "authentication_failed" || it.setupRequired,
                         listening = false,
+                        playing = false,
                         taskPhase = if (leaveVoiceWait) "idle" else it.taskPhase,
                         taskMessage = if (leaveVoiceWait) "按住眼镜腿说出任务" else it.taskMessage,
                         completionAwaitingReport = reportFailed || it.completionAwaitingReport,
@@ -444,12 +448,13 @@ class CommanderController(context: Context) : BridgeClient.Listener {
     }
 
     override fun onAudio(pcm: ByteArray) {
-        player.write(pcm)
+        runOnMain { player.write(pcm) }
     }
 
     override fun onClosed(reason: String) = runOnMain {
         val reportFailed = pendingReport != null
         pendingReport = null
+        player.stop()
         update {
             it.copy(
                 connection = ConnectionState.DISCONNECTED,
@@ -624,7 +629,12 @@ class CommanderController(context: Context) : BridgeClient.Listener {
     private fun appendContext(current: List<HudContextLine>, line: HudContextLine): List<HudContextLine> {
         val text = HudText.plain(line.text)
         if (text.isBlank()) return current
-        return (current + HudContextLine(line.role, text.take(1_200))).takeLast(MAX_CONTEXT_LINES)
+        val next = HudContextLine(line.role, text.take(1_200))
+        val previous = current.lastOrNull()
+        if (previous != null && previous.role == next.role && next.role != "status" && next.role != "context") {
+            return (current.dropLast(1) + next).takeLast(MAX_CONTEXT_LINES)
+        }
+        return (current + next).takeLast(MAX_CONTEXT_LINES)
     }
 
     private inline fun runOnMain(crossinline block: () -> Unit) {

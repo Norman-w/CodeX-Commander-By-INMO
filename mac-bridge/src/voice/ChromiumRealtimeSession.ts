@@ -200,6 +200,8 @@ export class ChromiumRealtimeSession extends EventEmitter {
   private pendingSdp?: string;
   private resolveStart?: () => void;
   private rejectStart?: (error: Error) => void;
+  private remoteAudioFrames = 0;
+  private remoteAudioBytes = 0;
 
   public constructor(
     private readonly host: ChromiumRealtimeHost,
@@ -216,6 +218,8 @@ export class ChromiumRealtimeSession extends EventEmitter {
     await this.close();
     this.threadId = threadId;
     this.remoteSampleRate = 48_000;
+    this.remoteAudioFrames = 0;
+    this.remoteAudioBytes = 0;
     this.offerRequested = false;
     this.connected = false;
 
@@ -401,6 +405,10 @@ export class ChromiumRealtimeSession extends EventEmitter {
       this.remoteSampleRate = message.sampleRate;
       return;
     }
+    if (type === 'remote-track') {
+      this.logger?.info?.('Chromium realtime remote audio track received');
+      return;
+    }
     if (type === 'state' && message.state === 'connected') {
       this.connected = true;
       this.resolveStart?.();
@@ -453,6 +461,15 @@ export class ChromiumRealtimeSession extends EventEmitter {
   private onRemoteAudio(audio: Buffer): void {
     const sampleCount = Math.floor(audio.length / 2);
     if (sampleCount <= 0) return;
+    this.remoteAudioFrames += 1;
+    this.remoteAudioBytes += audio.byteLength;
+    if (this.remoteAudioFrames <= 3) {
+      this.logger?.info?.('Chromium realtime remote audio frame received', {
+        bytes: audio.byteLength,
+        sampleRate: this.remoteSampleRate,
+        frame: this.remoteAudioFrames,
+      });
+    }
     if (this.remoteSampleRate === AUDIO_SAMPLE_RATE) {
       this.emit('audio', audio.subarray(0, sampleCount * 2));
       return;

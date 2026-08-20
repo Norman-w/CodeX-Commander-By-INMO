@@ -92,9 +92,7 @@ export class CommanderBridge {
       this.broadcast(this.journal.create({ type: "caption", role, text }, false));
     });
     this.voice.on("error", (error: Error) => {
-      if (this.audioResponseActive) {
-        this.broadcast(this.journal.create({ type: "assistant_audio_end" }, false));
-      }
+      this.broadcast(this.journal.create({ type: "assistant_audio_end" }, false));
       this.audioResponseActive = false;
       this.broadcastError(error instanceof VoiceClientError ? error.code : "realtime_error", error.message, true);
     });
