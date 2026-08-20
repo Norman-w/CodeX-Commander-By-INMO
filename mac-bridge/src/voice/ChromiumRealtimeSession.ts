@@ -33,6 +33,7 @@ const PAGE_SOURCE = String.raw`<!doctype html>
   let microphoneStream;
   let microphoneSource;
   let microphoneRouteGain;
+  let microphoneDeviceLabel = '';
   let inputMeterAnalyser;
   let inputMeterVisorGain;
   let inputMeterMicGain;
@@ -57,9 +58,25 @@ const PAGE_SOURCE = String.raw`<!doctype html>
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       throw new Error('Chromium does not expose getUserMedia for the Mac microphone');
     }
-    microphoneStream = await navigator.mediaDevices.getUserMedia({
-      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true }
-    });
+    const audioOptions = { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+    microphoneStream = await navigator.mediaDevices.getUserMedia({ audio: audioOptions });
+    let microphoneTrack = microphoneStream.getAudioTracks()[0];
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const preferredDevice = devices.find((device) =>
+      device.kind === 'audioinput'
+      && /microphone|麦克风/i.test(device.label)
+      && !/raylink|virtual|we.?meet|audio driver/i.test(device.label)
+    ) || devices.find((device) => device.kind === 'audioinput' && device.label);
+    const currentDeviceId = microphoneTrack && microphoneTrack.getSettings ? microphoneTrack.getSettings().deviceId : '';
+    if (preferredDevice && preferredDevice.deviceId && preferredDevice.deviceId !== currentDeviceId) {
+      microphoneStream.getTracks().forEach((track) => track.stop());
+      microphoneStream = await navigator.mediaDevices.getUserMedia({
+        audio: { ...audioOptions, deviceId: { exact: preferredDevice.deviceId } }
+      });
+      microphoneTrack = microphoneStream.getAudioTracks()[0];
+    }
+    microphoneDeviceLabel = microphoneTrack && microphoneTrack.label ? microphoneTrack.label : '电脑默认麦克风';
+    send({ type: 'microphone-device', label: microphoneDeviceLabel });
     microphoneSource = inputContext.createMediaStreamSource(microphoneStream);
     microphoneRouteGain = inputContext.createGain();
     microphoneSource.connect(microphoneRouteGain);
@@ -202,6 +219,7 @@ const PAGE_SOURCE = String.raw`<!doctype html>
         active: inputActive && peak > 0.01,
         rms: Math.sqrt(sumSquares / Math.max(1, inputMeterData.length)),
         peak,
+        device: microphoneDeviceLabel,
       });
     }, 100);
     if (inputSource === 'mac') await ensureMicrophone();
@@ -511,6 +529,12 @@ export class ChromiumRealtimeSession extends EventEmitter {
     }
     if (type === 'remote-track') {
       this.logger?.info?.('Chromium realtime remote audio track received');
+      return;
+    }
+    if (type === 'microphone-device') {
+      const label = typeof message.label === 'string' && message.label ? message.label : '电脑默认麦克风';
+      this.logger?.info?.('Chromium realtime microphone selected', { label });
+      this.emit('inputDevice', label);
       return;
     }
     if (type === 'input-level') {

@@ -315,11 +315,15 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
       testActive = value.testActive === true;
       testButton.dataset.active = String(testActive);
       testButton.textContent = testActive ? '停止音频测试' : '开始音频测试';
+      if (value.audioInputDevice) {
+        status.textContent = '输入：' + (inputLabels[inputControl.value] || inputControl.value) + '（设备：' + value.audioInputDevice + '）；输出：' + (outputLabels[outputControl.value] || outputControl.value);
+      }
     };
     const updateStatus = (value) => {
       inputControl.value = value.audioInputSource || 'visor';
       outputControl.value = value.localAudioOutput || 'visor_only';
-      status.textContent = '输入：' + (inputLabels[inputControl.value] || inputControl.value) + '；输出：' + (outputLabels[outputControl.value] || outputControl.value);
+      const device = value.audioInputDevice ? '（设备：' + value.audioInputDevice + '）' : '';
+      status.textContent = '输入：' + (inputLabels[inputControl.value] || inputControl.value) + device + '；输出：' + (outputLabels[outputControl.value] || outputControl.value);
     };
     async function load() {
       const response = await fetch('/api/settings', { cache: 'no-store' });

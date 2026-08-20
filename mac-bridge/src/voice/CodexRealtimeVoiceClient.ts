@@ -86,6 +86,7 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
       this.emit("inputLevel", level);
     });
     this.chromiumSession.on("outputLevel", (level) => this.emit("outputLevel", level));
+    this.chromiumSession.on("inputDevice", (label) => this.emit("inputDevice", label));
     this.unsubscribe = host.subscribeNotifications((notification) => this.handleNotification(notification));
   }
 

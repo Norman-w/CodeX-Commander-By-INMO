@@ -47,6 +47,7 @@ export class CommanderBridge {
   private inputLevelAt = 0;
   private outputLevelAt = 0;
   private diagnosticInputActive = false;
+  private audioInputDeviceLabel?: string;
 
   constructor(
     private readonly config: BridgeConfig,
@@ -106,6 +107,10 @@ export class CommanderBridge {
       this.outputLevel = level;
       this.outputLevelAt = Date.now();
     });
+    this.voice.on("inputDevice", (label: string) => {
+      this.audioInputDeviceLabel = label;
+      this.logger.info("Audio input device selected", { label });
+    });
     this.voice.on("audioEnd", (transcript: string) => {
       if (!this.audioResponseActive) return;
       this.audioResponseActive = false;
@@ -156,6 +161,7 @@ export class CommanderBridge {
     const now = Date.now();
     return {
       audioInputSource: this.audioInputSource,
+      audioInputDevice: this.audioInputDeviceLabel || null,
       localAudioOutput: this.localAudioOutput,
       testActive: this.diagnosticInputActive,
       visorConnected: [...this.sessions.values()].some((session) => session.authenticated),

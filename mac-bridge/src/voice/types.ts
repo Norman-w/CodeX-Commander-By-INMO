@@ -23,6 +23,7 @@ export type CommanderVoice = {
   on(event: "caption", listener: (role: "user" | "assistant", text: string) => void): unknown;
   on(event: "inputLevel", listener: (level: AudioLevel) => void): unknown;
   on(event: "outputLevel", listener: (level: AudioLevel) => void): unknown;
+  on(event: "inputDevice", listener: (label: string) => void): unknown;
   on(event: "error", listener: (error: Error) => void): unknown;
 };
 //#endregion
