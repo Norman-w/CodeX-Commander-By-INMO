@@ -11,7 +11,7 @@ import type { AudioInputSource, LocalAudioOutput } from "../config.js";
 import { measurePcm16 } from "./AudioDiagnostics.js";
 
 const AUDIO_SAMPLE_RATE = 24_000;
-const START_TIMEOUT_MS = 45_000;
+const START_TIMEOUT_MS = 15_000;
 const PAGE_SOURCE = String.raw`<!doctype html>
 <meta charset="utf-8">
 <title>Codex Commander realtime transport</title>
@@ -476,7 +476,30 @@ export class ChromiumRealtimeSession extends EventEmitter {
 
     const chrome = this.chrome;
     this.chrome = undefined;
-    if (chrome && !chrome.killed) chrome.kill('SIGTERM');
+    if (chrome && chrome.exitCode === null && chrome.signalCode === null) {
+      await new Promise<void>((resolve) => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const finish = () => {
+          if (timer) clearTimeout(timer);
+          chrome.off('exit', finish);
+          resolve();
+        };
+        const forceStop = () => {
+          if (chrome.exitCode !== null || chrome.signalCode !== null) {
+            finish();
+            return;
+          }
+          this.logger?.warn?.('Chromium realtime browser did not exit after SIGTERM; forcing shutdown', {
+            pid: chrome.pid ?? null,
+          });
+          chrome.kill('SIGKILL');
+          timer = setTimeout(finish, 500);
+        };
+        chrome.once('exit', finish);
+        timer = setTimeout(forceStop, 1_500);
+        if (!chrome.killed) chrome.kill('SIGTERM');
+      });
+    }
 
     const profileDir = this.profileDir;
     this.profileDir = undefined;
@@ -536,10 +559,24 @@ export class ChromiumRealtimeSession extends EventEmitter {
       `--user-data-dir=${profileDir}`,
       `http://127.0.0.1:${address.port}/`,
     ];
-    const chrome = spawn(chromePath, args, { stdio: 'ignore' });
+    const chrome = spawn(chromePath, args, { stdio: ['ignore', 'ignore', 'pipe'] });
     this.chrome = chrome;
+    this.logger?.info?.('Chromium realtime browser launched', {
+      pid: chrome.pid ?? null,
+      port: address.port,
+    });
+    chrome.stderr?.setEncoding('utf8');
+    chrome.stderr?.on('data', (chunk: string | Buffer) => {
+      const message = String(chunk).trim();
+      if (message) this.logger?.warn?.('Chromium realtime browser stderr', { message: message.slice(-4_000) });
+    });
     chrome.once('error', (error) => this.failStart(error));
     chrome.once('exit', (code, signal) => {
+      this.logger?.info?.('Chromium realtime browser exited', {
+        code,
+        signal,
+        connected: this.connected,
+      });
       if (!this.connected) this.failStart(new Error(`Chromium exited before realtime connection (${code ?? signal ?? 'unknown'})`));
     });
   }

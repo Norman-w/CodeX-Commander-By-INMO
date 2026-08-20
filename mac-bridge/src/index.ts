@@ -18,8 +18,17 @@ const logger = new Logger(config.logLevel);
 const bridge = new CommanderBridge(config, mediaRoot, logger);
 const server = new HttpWsServer(config, mediaRoot, bridge, logger);
 
+let pairing: ReturnType<CommanderBridge["getPairingSnapshot"]>;
+let startupError: unknown;
 try {
-  const pairing = await bridge.start();
+  pairing = await bridge.start();
+} catch (error) {
+  startupError = error;
+  logger.error("Bridge startup failed; management page will remain available", error instanceof Error ? error.stack : String(error));
+  pairing = bridge.getPairingSnapshot();
+}
+
+try {
   await server.listen();
   logger.info("CodeX Commander bridge ready", {
     listen: `http://${config.host}:${config.port}`,
@@ -28,10 +37,11 @@ try {
     voiceMode: config.voice.mode,
     appServerMode: config.appServer.mode,
     pairingCode: pairing.pairedDeviceId ? "already paired" : pairing.code,
-    pairingExpiresAt: pairing.expiresAt || undefined
+    pairingExpiresAt: pairing.expiresAt || undefined,
+    voiceStartupError: startupError instanceof Error ? startupError.message : undefined,
   });
 } catch (error) {
-  logger.error("Bridge startup failed", error instanceof Error ? error.stack : String(error));
+  logger.error("Bridge HTTP startup failed", error instanceof Error ? error.stack : String(error));
   await server.close().catch(() => undefined);
   await bridge.stop().catch(() => undefined);
   process.exitCode = 1;

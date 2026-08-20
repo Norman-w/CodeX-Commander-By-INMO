@@ -61,6 +61,7 @@ export class CommanderBridge {
   private voiceChatActive = false;
   private voiceChatPhase: "starting" | "connected" | "stopping" | "stopped" | "error" = "stopped";
   private voiceChatError?: string;
+  private voiceControlOperation?: Promise<void>;
   private audioInputDeviceLabel?: string;
   private audioInputTransport: "none" | "visor" | "management_page" | "chromium_native" = "none";
   private managementAudioAt = 0;
@@ -242,6 +243,17 @@ export class CommanderBridge {
   }
 
   async startVoiceChat(): Promise<void> {
+    if (this.voiceControlOperation) return this.voiceControlOperation;
+    const operation = this.startVoiceChatInternal();
+    this.voiceControlOperation = operation;
+    try {
+      await operation;
+    } finally {
+      if (this.voiceControlOperation === operation) this.voiceControlOperation = undefined;
+    }
+  }
+
+  private async startVoiceChatInternal(): Promise<void> {
     if (this.voiceChatActive) return;
     if (!this.voice.startSession) {
       throw new BridgeError("voice_control_unavailable", "当前 Voice Chat 客户端不支持启动控制", true);
@@ -262,6 +274,8 @@ export class CommanderBridge {
   }
 
   async stopVoiceChat(): Promise<void> {
+    const pendingStart = this.voiceControlOperation;
+    if (pendingStart) await pendingStart.catch(() => undefined);
     if (!this.voiceChatActive && this.voiceChatPhase === "stopped") return;
     if (!this.voice.stopSession) {
       throw new BridgeError("voice_control_unavailable", "当前 Voice Chat 客户端不支持挂断控制", true);

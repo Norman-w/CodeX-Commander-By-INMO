@@ -58,6 +58,7 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
   private readonly orchestrator: RealtimeSessionOrchestrator;
   private readonly chromiumSession: ChromiumRealtimeSession;
   private sessionReset?: Promise<void>;
+  private sessionStart?: Promise<void>;
   private outputAudioFrames = 0;
   private outputNotificationFrames = 0;
 
@@ -238,6 +239,17 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
   }
 
   private async ensureSession(): Promise<void> {
+    if (this.sessionStart) return this.sessionStart;
+    const operation = this.ensureSessionInternal();
+    this.sessionStart = operation;
+    try {
+      await operation;
+    } finally {
+      if (this.sessionStart === operation) this.sessionStart = undefined;
+    }
+  }
+
+  private async ensureSessionInternal(): Promise<void> {
     const threadId = await this.host.ensureSelectedThread();
     if (this.sessionActive && this.threadId === threadId) return;
     if (this.sessionActive && this.threadId && this.threadId !== threadId) {
@@ -247,7 +259,7 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
     this.threadId = threadId;
     this.orchestrator.markStarting();
     try {
-      await this.startRealtime(threadId);
+      await this.startRealtimeWithRetry(threadId);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (!message.includes("does not support realtime conversation")) {
@@ -258,7 +270,7 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
       const voiceThreadId = await this.host.startVoiceThread();
       this.threadId = voiceThreadId;
       try {
-        await this.startRealtime(voiceThreadId);
+        await this.startRealtimeWithRetry(voiceThreadId);
       } catch (retryError) {
         const retryMessage = retryError instanceof Error ? retryError.message : String(retryError);
         this.logger.warn("Codex Voice Chat start failed", { message: retryMessage });
@@ -276,8 +288,28 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
     }
     this.sessionActive = false;
     this.threadId = threadId;
-    await this.startRealtime(threadId);
+    await this.startRealtimeWithRetry(threadId);
     this.sessionActive = true;
+  }
+
+  private async startRealtimeWithRetry(threadId: string): Promise<void> {
+    try {
+      await this.startRealtime(threadId);
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const retryable = [
+        "Chromium realtime page did not connect in time",
+        "Chromium exited before realtime connection",
+        "Chromium realtime control socket",
+        "local realtime control socket failed",
+      ].some((part) => message.includes(part));
+      if (!retryable) throw error;
+      this.logger.warn("Retrying Codex Voice Chat Chromium startup", { threadId, message });
+      await this.host.requestJsonRpc("thread/realtime/stop", { threadId }).catch(() => undefined);
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      await this.startRealtime(threadId);
+    }
   }
 
   private startRealtime(threadId: string): Promise<unknown> {
