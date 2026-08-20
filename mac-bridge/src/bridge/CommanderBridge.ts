@@ -138,6 +138,12 @@ export class CommanderBridge {
       if (this.audioInputSource === "visor") this.audioInputTransport = "visor";
       this.logger.info("Audio input device selected", { label });
     });
+    this.voice.on("microphoneError", (message: string) => {
+      this.audioInputTransport = "none";
+      this.audioInputDeviceLabel = `麦克风不可用：${message}`;
+      this.logger.warn("Audio input microphone failed", { message });
+      this.broadcastError("microphone_unavailable", `电脑麦克风不可用：${message}`, true);
+    });
     this.voice.on("audioEnd", (transcript: string) => {
       this.voiceTurnActive = false;
       this.recordVoiceEvent({ type: "audio_end" });

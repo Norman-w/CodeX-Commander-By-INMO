@@ -26,6 +26,7 @@ export type CommanderVoice = {
   on(event: "inputLevel", listener: (level: AudioLevel) => void): unknown;
   on(event: "outputLevel", listener: (level: AudioLevel) => void): unknown;
   on(event: "inputDevice", listener: (label: string) => void): unknown;
+  on(event: "microphoneError", listener: (message: string) => void): unknown;
   on(event: "error", listener: (error: Error) => void): unknown;
 };
 //#endregion

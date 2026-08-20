@@ -53,6 +53,7 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
   private sessionFailure: string | null = null;
   private replyTimer?: NodeJS.Timeout;
   private inputHadSignal = false;
+  private audioInputSource: AudioInputSource;
   private readonly pending: Buffer[] = [];
   private readonly captions = new CaptionLog();
   private readonly orchestrator: RealtimeSessionOrchestrator;
@@ -75,6 +76,7 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
       restartSession: () => this.restartSession()
     });
     this.chromiumSession = new ChromiumRealtimeSession(host, logger, localAudioOutput, audioInputSource);
+    this.audioInputSource = audioInputSource;
     this.chromiumSession.on("audio", (pcm: Buffer) => {
       this.onOutputAudio({
         data: pcm.toString("base64"),
@@ -87,6 +89,7 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
       if (level.active) this.inputHadSignal = true;
       this.emit("inputLevel", level);
     });
+    this.chromiumSession.on("microphoneError", (message) => this.emit("microphoneError", message));
     this.chromiumSession.on("outputLevel", (level) => this.emit("outputLevel", level));
     this.chromiumSession.on("inputDevice", (label) => this.emit("inputDevice", label));
     this.unsubscribe = host.subscribeNotifications((notification) => this.handleNotification(notification));
@@ -101,6 +104,7 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
   }
 
   setAudioInputSource(source: AudioInputSource): void {
+    this.audioInputSource = source;
     this.chromiumSession.setAudioInputSource(source);
   }
 
@@ -170,14 +174,18 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
     this.inputStarted = false;
     try {
       await this.appendChain.catch(() => undefined);
-      if (this.inputBytes === 0 && !this.inputHadSignal) {
+      const nativeMicrophone = this.audioInputSource === "mac";
+      if (this.inputBytes === 0 && !this.inputHadSignal && !nativeMicrophone) {
         this.inputItemId = null;
         throw new VoiceClientError(
           "no_input_audio",
           "未收到输入音频：电脑麦克风请允许权限并选择电脑麦克风，眼镜麦克风请使用眼镜 PTT"
         );
       }
-      if (this.inputBytes < MIN_INPUT_AUDIO_BYTES && !this.inputHadSignal) {
+      if (nativeMicrophone && this.inputBytes === 0 && !this.inputHadSignal) {
+        this.logger.warn("Native Chromium microphone has no detected signal; committing the turn for server-side diagnosis");
+      }
+      if (this.inputBytes < MIN_INPUT_AUDIO_BYTES && !this.inputHadSignal && !nativeMicrophone) {
         this.inputItemId = null;
         throw new VoiceClientError("ptt_too_short", "收到的输入音频太短或没有有效声音，请再说一次");
       }

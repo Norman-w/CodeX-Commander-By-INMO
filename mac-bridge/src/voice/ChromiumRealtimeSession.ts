@@ -99,7 +99,10 @@ const PAGE_SOURCE = String.raw`<!doctype html>
     inputSource = value === 'mac' ? 'mac' : 'visor';
     if (inputSource === 'mac') {
       send({ type: 'microphone-device', label: '等待 Chromium 原生麦克风' });
-      void ensureMicrophone().catch(fail);
+      void ensureMicrophone().catch((error) => {
+        const message = String(error && (error.stack || error.message) || error);
+        send({ type: 'microphone-error', message });
+      });
     }
     applyInputRouting();
     send({ type: 'input-source', source: inputSource });
@@ -653,6 +656,12 @@ export class ChromiumRealtimeSession extends EventEmitter {
       const label = typeof message.label === 'string' && message.label ? message.label : '电脑默认麦克风';
       this.logger?.info?.('Chromium realtime microphone selected', { label });
       this.emit('inputDevice', label);
+      return;
+    }
+    if (type === 'microphone-error') {
+      const messageText = typeof message.message === 'string' ? message.message : 'Chromium 原生麦克风不可用';
+      this.logger?.warn?.('Chromium realtime microphone failed', { message: messageText });
+      this.emit('microphoneError', messageText);
       return;
     }
     if (type === 'input-level') {
