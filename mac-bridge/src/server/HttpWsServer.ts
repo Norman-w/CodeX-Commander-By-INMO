@@ -280,59 +280,141 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>CodeX Commander Bridge 音频诊断</title>
   <style>
-    :root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif; background: #070d12; color: #eef9fb; }
-    body { margin: 0; min-height: 100vh; background: radial-gradient(circle at 8% 0%, #205466, transparent 40%), radial-gradient(circle at 100% 100%, #243a52, transparent 42%), #070d12; }
-    main { width: min(900px, calc(100vw - 32px)); margin: 0 auto; padding: 34px 0 48px; }
-    h1 { margin: 0 0 8px; font-size: clamp(28px, 5vw, 44px); letter-spacing: -.04em; }
-    p { color: #a9c2ca; line-height: 1.6; }
-    .eyebrow { color: #68e0d0; font-size: 12px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
-    .panel { margin-top: 24px; padding: 22px; border: 1px solid #294d59; border-radius: 22px; background: rgba(10, 27, 35, .88); box-shadow: 0 24px 80px rgba(0,0,0,.26); }
-    .routes, .meters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-    .field, .meter { padding: 18px; border-radius: 16px; background: #102832; }
-    .field label, .meter-title { display: block; margin-bottom: 9px; color: #a9c7ce; font-size: 13px; font-weight: 700; }
-    select, button { width: 100%; border: 1px solid #3c6974; border-radius: 11px; padding: 12px 13px; color: #f4ffff; background: #0b1b22; font: inherit; }
-    button { cursor: pointer; border-color: #54d9c9; color: #052020; background: #63e4d1; font-weight: 800; }
-    button[data-active="true"] { border-color: #ffb86c; color: #291706; background: #ffbf73; }
-    .meter-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-    .meter-status { color: #6fe3bd; font-size: 12px; }
-    .bar { height: 14px; margin: 16px 0 10px; overflow: hidden; border-radius: 999px; background: #071317; }
-    .fill { width: 0%; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #36c7ff, #67e5c6, #ffd166); transition: width .12s linear; }
-    .values { display: flex; justify-content: space-between; color: #96b4bc; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
-    .transcript-panel { display: grid; gap: 12px; }
-    .voice-events { display: grid; gap: 8px; max-height: 300px; overflow: auto; }
-    .voice-event { padding: 10px 12px; border-left: 3px solid #5f8490; border-radius: 8px; background: #0b1b22; color: #e7f7f7; white-space: pre-wrap; word-break: break-word; }
-    .voice-event.user { border-left-color: #65c7ff; }
-    .voice-event.assistant { border-left-color: #63e4d1; }
-    .voice-event.error { border-left-color: #ff8176; color: #ffd1cb; }
-    .voice-event-label { display: block; margin-bottom: 4px; color: #9bbac2; font-size: 12px; font-weight: 800; }
-    .action { display: grid; grid-template-columns: minmax(0, 1fr) 220px; align-items: end; gap: 18px; }
-    .voice-control { display: flex; align-items: center; justify-content: space-between; gap: 24px; border-color: rgba(255, 204, 128, .36); background: linear-gradient(120deg, rgba(255, 204, 128, .13), rgba(255, 255, 255, .04)); }
-    .voice-state { margin-top: 10px; color: #ffd28a; font-size: 17px; font-weight: 700; }
-    button.primary { min-width: 168px; border-color: rgba(255, 204, 128, .65); background: #ffcc80; color: #24190b; }
-    .actions { display: grid; gap: 10px; }
-    #status { min-height: 22px; color: #70e6b0; }
-    .hint { color: #8caab2; font-size: 13px; }
-    code { color: #79def5; }
-    @media (max-width: 680px) { main { width: min(100% - 24px, 520px); padding-top: 24px; } .routes, .meters, .action { grid-template-columns: 1fr; } }
+    :root {
+      color-scheme: dark;
+      --ink: #f4eee6;
+      --muted: #9f9b92;
+      --dim: #65635e;
+      --bg: #11110f;
+      --panel: rgba(29, 28, 25, .76);
+      --line: rgba(244, 238, 230, .14);
+      --input: #72b9ff;
+      --output: #ff9a6a;
+      --signal: #f3d27a;
+      --danger: #ff736b;
+      font-family: "Avenir Next", "Helvetica Neue", sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; overflow-x: hidden; background: var(--bg); }
+    body::before { content: ""; position: fixed; inset: 0; pointer-events: none; opacity: .32; background-image: linear-gradient(rgba(255,255,255,.045) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px); background-size: 42px 42px; mask-image: linear-gradient(to bottom, black, transparent 82%); }
+    body::after { content: ""; position: fixed; inset: -20%; pointer-events: none; background: radial-gradient(circle at 50% 32%, rgba(243,210,122,.07), transparent 28%), radial-gradient(circle at 0% 50%, rgba(114,185,255,.09), transparent 30%), radial-gradient(circle at 100% 50%, rgba(255,154,106,.08), transparent 30%); }
+    main { position: relative; z-index: 1; width: min(1480px, 100%); margin: 0 auto; padding: 26px clamp(18px, 4vw, 64px) 56px; }
+    .topbar { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+    .brand { display: flex; align-items: center; gap: 11px; color: var(--ink); font-size: 13px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+    .brand-mark { width: 10px; height: 10px; border: 2px solid var(--signal); border-radius: 50%; box-shadow: 0 0 0 5px rgba(243,210,122,.1); }
+    .system-readout { display: flex; align-items: center; gap: 12px; color: var(--muted); font: 11px "SF Mono", Menlo, monospace; letter-spacing: .1em; text-transform: uppercase; }
+    .readout-label { color: var(--dim); }
+    .workspace { display: grid; grid-template-columns: minmax(132px, .65fr) minmax(460px, 1.8fr) minmax(132px, .65fr); gap: clamp(24px, 5vw, 80px); min-height: 650px; padding: 34px 0 30px; }
+    .signal-rail { position: relative; display: flex; min-height: 590px; flex-direction: column; justify-content: space-between; padding: 18px 0; }
+    .signal-rail::before { content: ""; position: absolute; top: 0; bottom: 0; width: 1px; background: linear-gradient(transparent, var(--line) 14%, var(--line) 86%, transparent); }
+    .signal-left::before { right: -16px; }
+    .signal-right::before { left: -16px; }
+    .rail-heading { display: grid; gap: 7px; }
+    .rail-kicker { color: var(--dim); font: 10px "SF Mono", Menlo, monospace; letter-spacing: .15em; }
+    .rail-name { color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    .rail-status { color: var(--input); font-size: 12px; }
+    .signal-right .rail-status { color: var(--output); }
+    .rail-track { position: relative; flex: 1; width: 48px; min-height: 360px; margin: 28px auto; overflow: hidden; border: 1px solid var(--line); background: rgba(255,255,255,.025); }
+    .rail-track::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(to bottom, transparent 0, transparent 15px, rgba(255,255,255,.12) 16px); }
+    .rail-fill { position: absolute; right: 0; bottom: 0; left: 0; z-index: 1; height: 0; background: linear-gradient(to top, rgba(114,185,255,.18), var(--input)); box-shadow: 0 0 26px rgba(114,185,255,.48); transition: height .12s linear; }
+    .signal-right .rail-fill { background: linear-gradient(to top, rgba(255,154,106,.16), var(--output)); box-shadow: 0 0 26px rgba(255,154,106,.42); }
+    .rail-fill::after { content: ""; position: absolute; top: 0; right: 0; left: 0; height: 2px; background: #fff; box-shadow: 0 0 13px currentColor; }
+    .rail-values { display: grid; gap: 6px; color: var(--muted); font: 11px "SF Mono", Menlo, monospace; }
+    .rail-values span:last-child { color: var(--dim); }
+    .call-stage { position: relative; display: flex; min-height: 590px; flex-direction: column; align-items: center; justify-content: center; padding: 20px 0 0; text-align: center; }
+    .stage-kicker { color: var(--signal); font: 11px "SF Mono", Menlo, monospace; letter-spacing: .2em; text-transform: uppercase; }
+    h1 { max-width: 700px; margin: 18px 0 12px; font-size: clamp(44px, 7vw, 92px); font-weight: 500; letter-spacing: -.075em; line-height: .94; }
+    .lede { max-width: 530px; margin: 0; color: var(--muted); font-size: 15px; line-height: 1.65; }
+    .call-orb { position: relative; display: grid; width: 176px; height: 176px; place-items: center; margin: 36px 0 22px; border: 1px solid rgba(243,210,122,.34); border-radius: 50%; background: radial-gradient(circle, rgba(243,210,122,.14), transparent 58%); box-shadow: 0 0 0 14px rgba(243,210,122,.035), 0 0 90px rgba(243,210,122,.1); }
+    .call-orb::before, .call-orb::after { content: ""; position: absolute; border: 1px solid rgba(243,210,122,.28); border-radius: 50%; }
+    .call-orb::before { inset: 18px; }
+    .call-orb::after { inset: -12px; border-color: rgba(243,210,122,.12); }
+    .orb-core { width: 34px; height: 34px; border-radius: 50%; background: var(--signal); box-shadow: 0 0 30px rgba(243,210,122,.75); }
+    .call-orb[data-phase="starting"] { animation: dialPulse 1.8s ease-in-out infinite; }
+    .call-orb[data-phase="connected"] { border-color: rgba(114,185,255,.5); background: radial-gradient(circle, rgba(114,185,255,.18), transparent 58%); box-shadow: 0 0 0 14px rgba(114,185,255,.035), 0 0 90px rgba(114,185,255,.16); }
+    .call-orb[data-phase="connected"] .orb-core { background: var(--input); box-shadow: 0 0 30px rgba(114,185,255,.85); }
+    .call-orb[data-phase="error"] { border-color: rgba(255,115,107,.5); }
+    .call-orb[data-phase="error"] .orb-core { background: var(--danger); box-shadow: 0 0 30px rgba(255,115,107,.7); }
+    @keyframes dialPulse { 0%, 100% { transform: scale(1); opacity: .72; } 50% { transform: scale(1.05); opacity: 1; } }
+    .voice-state { min-height: 24px; color: var(--signal); font-size: 16px; font-weight: 700; }
+    .call-button { width: min(260px, 100%); margin-top: 18px; }
+    .control-dock { width: min(620px, 100%); margin-top: 38px; padding: 16px; border: 1px solid var(--line); background: var(--panel); box-shadow: 0 24px 80px rgba(0,0,0,.2); backdrop-filter: blur(18px); }
+    .control-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .field { display: grid; gap: 8px; text-align: left; }
+    .field-label { color: var(--dim); font: 10px "SF Mono", Menlo, monospace; letter-spacing: .12em; text-transform: uppercase; }
+    .field-note { color: var(--dim); font-size: 11px; }
+    select, button { width: 100%; min-height: 48px; border: 1px solid var(--line); border-radius: 0; padding: 12px 13px; color: var(--ink); background: rgba(0,0,0,.22); font: inherit; transition: border-color .2s ease, background .2s ease, opacity .2s ease, transform .2s ease; }
+    select:focus-visible, button:focus-visible { outline: 2px solid var(--signal); outline-offset: 3px; }
+    select:disabled { color: var(--dim); opacity: .5; }
+    button { cursor: pointer; font-weight: 700; }
+    button:hover:not(:disabled) { transform: translateY(-2px); }
+    button:disabled { cursor: not-allowed; opacity: .3; }
+    button.primary { border-color: var(--signal); color: #181510; background: var(--signal); font-size: 15px; letter-spacing: .04em; }
+    button.primary:hover:not(:disabled) { background: #ffe19b; box-shadow: 0 12px 35px rgba(243,210,122,.18); }
+    button[data-active="true"] { border-color: var(--output); color: #20130d; background: var(--output); }
+    .action-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
+    .status-line { min-height: 22px; margin-top: 14px; color: var(--signal); font-size: 12px; text-align: left; }
+    .control-hint { margin-top: 4px; color: var(--muted); font-size: 12px; line-height: 1.5; text-align: left; }
+    .log-panel { margin-top: 2px; padding-top: 22px; border-top: 1px solid var(--line); }
+    .log-heading { display: flex; align-items: end; justify-content: space-between; gap: 20px; }
+    .log-title { margin-top: 7px; font-size: 24px; letter-spacing: -.04em; }
+    .meter-status { color: var(--signal); font: 11px "SF Mono", Menlo, monospace; }
+    .voice-events { display: grid; gap: 1px; max-height: 360px; margin-top: 18px; overflow: auto; border-top: 1px solid var(--line); }
+    .voice-event { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 18px; padding: 16px 4px; border-bottom: 1px solid var(--line); color: var(--ink); white-space: pre-wrap; word-break: break-word; }
+    .voice-event.user { color: var(--input); }
+    .voice-event.assistant { color: var(--output); }
+    .voice-event.error { color: var(--danger); }
+    .voice-event-label { color: var(--muted); font: 10px "SF Mono", Menlo, monospace; letter-spacing: .08em; text-transform: uppercase; }
+    .voice-event.error .voice-event-label { color: var(--danger); }
+    .hint { color: var(--muted); font-size: 12px; line-height: 1.55; }
+    footer { display: flex; justify-content: space-between; gap: 20px; margin-top: 22px; color: var(--dim); font: 10px "SF Mono", Menlo, monospace; letter-spacing: .08em; text-transform: uppercase; }
+    @media (max-width: 900px) { .workspace { grid-template-columns: 86px minmax(0, 1fr) 86px; gap: 24px; } h1 { font-size: clamp(42px, 8vw, 72px); } }
+    @media (max-width: 680px) { main { padding-top: 20px; } .topbar { align-items: flex-start; flex-direction: column; } .system-readout { align-self: stretch; justify-content: space-between; } .workspace { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; min-height: 0; padding-top: 24px; } .call-stage { grid-column: 1 / -1; grid-row: 1; min-height: 650px; padding-top: 0; } .signal-left { grid-column: 1; grid-row: 2; min-height: 250px; } .signal-right { grid-column: 2; grid-row: 2; min-height: 250px; } .rail-track { min-height: 130px; margin: 14px auto; } .control-grid, .action-row { grid-template-columns: 1fr; } .voice-event { grid-template-columns: 1fr; gap: 7px; } footer { flex-direction: column; } }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }
   </style>
 </head>
 <body>
   <main>
-    <div class="eyebrow">CodeX Commander / Bridge</div>
-    <h1>原生 Voice Chat 音频诊断</h1>
-    <p>先选择输入和输出，再启动一次测试。这里走当前 ChatGPT 登录态与 Chromium WebRTC 原生音频，不使用 TTS。</p>
-    <section class="panel routes">
-      <div class="field"><label for="audioInput">输入来源</label><select id="audioInput"><option value="visor">眼镜麦克风</option><option value="mac">电脑麦克风</option></select><div class="hint">开始/停止音频测试使用电脑麦克风；眼镜麦克风由眼镜 PTT 触发。</div></div>
-      <div class="field"><label for="localAudio">服务器回复输出</label><select id="localAudio"><option value="visor_only">仅眼镜</option><option value="mac_only">仅电脑</option><option value="mac_and_visor">电脑 + 眼镜</option></select><div class="hint">电脑输出由 Chromium WebRTC 远端音频直接播放。</div></div>
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span>CodeX Commander / Bridge</span></div>
+      <div class="system-readout"><span class="readout-label">LINK</span><span id="linkReadout">未接通</span></div>
+    </header>
+    <div class="workspace">
+      <aside class="signal-rail signal-left" aria-label="输入音频电平">
+        <div class="rail-heading"><span class="rail-kicker">CHANNEL 01</span><span class="rail-name">Input / Mic</span><span id="inputStatus" class="rail-status">未采集</span></div>
+        <div class="rail-track"><div id="inputFill" class="rail-fill"></div></div>
+        <div class="rail-values"><span id="inputRms">RMS 0.000</span><span id="inputPeak">PEAK 0.000</span></div>
+      </aside>
+      <section class="call-stage">
+        <div class="stage-kicker">Native voice link / current session</div>
+        <h1>原生 Voice Chat</h1>
+        <p class="lede">先拨通，再选择输入与回放。通话未接通前，所有音频动作保持锁定。</p>
+        <div id="callOrb" class="call-orb" data-phase="stopped" aria-hidden="true"><span class="orb-core"></span></div>
+        <div id="voiceChatStatus" class="voice-state">未接通 · 音频控制已锁定</div>
+        <button id="voiceChatButton" class="primary call-button" type="button">拨打电话</button>
+        <div class="control-dock">
+          <div class="control-grid">
+            <label class="field"><span class="field-label">输入来源</span><select id="audioInput" disabled><option value="visor">眼镜麦克风</option><option value="mac">电脑麦克风</option></select><span class="field-note">电脑麦克风来自当前 Chrome 页面；眼镜由 PTT 触发。</span></label>
+            <label class="field"><span class="field-label">服务器回放</span><select id="localAudio" disabled><option value="visor_only">仅眼镜</option><option value="mac_only">仅电脑</option><option value="mac_and_visor">电脑 + 眼镜</option></select><span class="field-note">服务器原生 WebRTC 音频，不使用 TTS。</span></label>
+          </div>
+          <div class="action-row"><button id="sampleButton" type="button" disabled>播放 hi there 探针</button><button id="testButton" type="button" disabled>开始说话</button></div>
+          <div id="status" class="status-line">先拨打电话，接通后才能使用音频。</div>
+          <div id="controlHint" class="control-hint">电话状态会像真实通话一样控制音频设备与操作权限。</div>
+        </div>
+      </section>
+      <aside class="signal-rail signal-right" aria-label="服务器返回音频电平">
+        <div class="rail-heading"><span class="rail-kicker">CHANNEL 02</span><span class="rail-name">Output / Reply</span><span id="outputStatus" class="rail-status">未收到</span></div>
+        <div class="rail-track"><div id="outputFill" class="rail-fill"></div></div>
+        <div class="rail-values"><span id="outputRms">RMS 0.000</span><span id="outputPeak">PEAK 0.000</span></div>
+      </aside>
+    </div>
+    <section class="log-panel" aria-live="polite">
+      <div class="log-heading"><div><div class="rail-kicker">SESSION TRANSCRIPT</div><div class="log-title">通话记录</div></div><div id="voiceEventStatus" class="meter-status">等待服务器返回</div></div>
+      <div id="voiceEvents" class="voice-events"></div>
     </section>
-    <section class="panel meters">
-      <div class="meter"><div class="meter-head"><div class="meter-title">输入电平</div><div id="inputStatus" class="meter-status">未采集</div></div><div class="bar"><div id="inputFill" class="fill"></div></div><div class="values"><span id="inputRms">RMS 0.000</span><span id="inputPeak">Peak 0.000</span></div></div>
-      <div class="meter"><div class="meter-head"><div class="meter-title">服务器返回电平</div><div id="outputStatus" class="meter-status">未收到</div></div><div class="bar"><div id="outputFill" class="fill"></div></div><div class="values"><span id="outputRms">RMS 0.000</span><span id="outputPeak">Peak 0.000</span></div></div>
-    </section>
-    <section class="panel transcript-panel"><div class="meter-head"><div><div class="meter-title">服务器解析 / 原生返回</div><div class="hint">和眼镜使用同一份 Voice Chat 事件；这里能区分“识别到了”与“收到音频”。</div></div><div id="voiceEventStatus" class="meter-status">等待服务器返回</div></div><div id="voiceEvents" class="voice-events"></div></section>
-    <section class="panel voice-control"><div><div class="eyebrow">VOICE CHAT 总控</div><h2>会话生命周期</h2><div class="voice-state" id="voiceChatStatus">正在读取 Voice Chat 状态...</div><div class="hint">先启动会话，再测试输入和服务器返回；挂断后所有测试按钮都会锁定。</div></div><button id="voiceChatButton" class="primary" type="button">启动 Voice Chat</button></section>
-    <section class="panel action"><div><div id="status">正在读取 Bridge 状态...</div><div class="hint">先用已生成的 hi there 音频验证服务器返回；电脑麦克风录音随后接入。</div></div><div class="actions"><button id="sampleButton" type="button">发送测试 hi there</button><button id="testButton" type="button">开始音频测试</button></div></section>
-    <p class="hint">管理页只允许从本机访问。当前设置只作用于运行中的 Bridge，重启后回到环境变量默认值。</p>
+    <footer><span>ChatGPT login state / Chromium WebRTC</span><span>Local bridge · 127.0.0.1:8787</span></footer>
   </main>
   <script>
     const inputControl = document.querySelector('#audioInput');
@@ -352,6 +434,9 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     const outputStatus = document.querySelector('#outputStatus');
     const voiceEventStatus = document.querySelector('#voiceEventStatus');
     const voiceEvents = document.querySelector('#voiceEvents');
+    const linkReadout = document.querySelector('#linkReadout');
+    const callOrb = document.querySelector('#callOrb');
+    const controlHint = document.querySelector('#controlHint');
     let testActive = false;
     let voiceChatActive = false;
     let voiceTurnActive = false;
@@ -359,12 +444,72 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     let actionMessage = '';
     let managementSocket = null;
     let macCapture = null;
+    let toneContext = null;
+    let dialToneTimer = null;
+    let callToneSession = false;
+    let callToneConnected = false;
     const outputLabels = { visor_only: '仅眼镜', mac_only: '仅电脑', mac_and_visor: '电脑 + 眼镜' };
     const inputLabels = { visor: '眼镜麦克风', mac: '电脑麦克风' };
     const transportLabels = { none: '未开始采集', visor: '眼镜通道', management_page: '8787 网页通道', chromium_native: 'Chromium 原生通道' };
     const clamp = (value) => Math.max(0, Math.min(1, Number(value) || 0));
     const meterWidth = (level) => Math.min(100, Math.max(0, Math.round(clamp(level.peak) * 100)));
     const showAction = (message) => { actionMessage = message; status.textContent = message; };
+    const getToneContext = () => {
+      const Context = window.AudioContext || window.webkitAudioContext;
+      if (!Context) return null;
+      if (!toneContext) toneContext = new Context();
+      if (toneContext.state === 'suspended') void toneContext.resume();
+      return toneContext;
+    };
+    const beep = (frequency, duration, volume = .045, delay = 0) => {
+      const context = getToneContext();
+      if (!context) return;
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      const start = context.currentTime + delay;
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(frequency, start);
+      gain.gain.setValueAtTime(.0001, start);
+      gain.gain.exponentialRampToValueAtTime(volume, start + .018);
+      gain.gain.exponentialRampToValueAtTime(.0001, start + duration);
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.start(start);
+      oscillator.stop(start + duration + .03);
+    };
+    const stopDialTone = () => {
+      if (dialToneTimer !== null) {
+        window.clearInterval(dialToneTimer);
+        dialToneTimer = null;
+      }
+    };
+    const beginDialTone = () => {
+      stopDialTone();
+      callToneSession = true;
+      callToneConnected = false;
+      const ring = () => beep(425, 1.12, .04);
+      ring();
+      dialToneTimer = window.setInterval(ring, 3000);
+    };
+    const playDisconnectTone = () => {
+      beep(520, .16, .05);
+      beep(350, .22, .05, .18);
+      beep(240, .32, .045, .42);
+    };
+    const finishCallTone = (disconnect) => {
+      stopDialTone();
+      if (disconnect) playDisconnectTone();
+      callToneSession = false;
+      callToneConnected = false;
+    };
+    const syncCallTone = (phase) => {
+      if (phase === 'connected') {
+        callToneConnected = true;
+        stopDialTone();
+      } else if ((phase === 'error' || phase === 'stopped') && callToneSession && callToneConnected) {
+        finishCallTone(true);
+      }
+    };
     const renderVoiceEvents = (events) => {
       const items = Array.isArray(events) ? events.slice(-40) : [];
       voiceEvents.replaceChildren();
@@ -471,8 +616,8 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
       voiceChatStatus.textContent = phaseLabels[phase] || phase;
       voiceChatButton.textContent = voiceChatActive ? '挂断 Voice Chat' : '启动 Voice Chat';
       voiceChatButton.disabled = phase === 'starting' || phase === 'stopping';
-      inputFill.style.width = meterWidth(input) + '%';
-      outputFill.style.width = meterWidth(output) + '%';
+      inputFill.style.height = meterWidth(input) + '%';
+      outputFill.style.height = meterWidth(output) + '%';
       inputRms.textContent = 'RMS ' + clamp(input.rms).toFixed(3);
       inputPeak.textContent = 'Peak ' + clamp(input.peak).toFixed(3);
       outputRms.textContent = 'RMS ' + clamp(output.rms).toFixed(3);
@@ -487,13 +632,27 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
       renderVoiceEvents(value.voiceEvents);
       testActive = value.testActive === true;
       voiceTurnActive = value.voiceTurnActive === true;
-      sampleButton.disabled = !voiceChatActive || testActive;
+      const connected = voiceChatActive && phase === 'connected';
+      callOrb.dataset.phase = phase;
+      linkReadout.textContent = phase === 'connected' ? '已接通' : phase === 'starting' ? '拨号中' : phase === 'stopping' ? '挂断中' : '未接通';
+      syncCallTone(phase);
+      voiceChatButton.textContent = connected ? '挂断电话' : phase === 'starting' ? '拨号中...' : '拨打电话';
+      inputControl.disabled = !connected;
+      outputControl.disabled = !connected;
+      sampleButton.disabled = !connected || testActive;
       sampleButton.textContent = voiceTurnActive
         ? (pendingSample ? 'hi there 已排队' : '等待上一轮完成后发送 hi there')
         : '发送测试 hi there';
-      testButton.disabled = !testActive && (!voiceChatActive || voiceTurnActive);
+      testButton.disabled = !connected || (!testActive && voiceTurnActive);
       testButton.dataset.active = String(testActive);
-      testButton.textContent = testActive ? '停止音频测试' : '开始音频测试';
+      testButton.textContent = testActive ? '结束并发送' : '开始说话';
+      controlHint.textContent = connected
+        ? '通话已接通。可以播放 hi there 探针，或使用 Chrome 麦克风开始一轮对话。'
+        : phase === 'starting'
+          ? '正在拨号，音频控制将在实时链路接通后解锁。'
+          : phase === 'stopping'
+            ? '正在挂断，正在释放音频链路。'
+            : '未接通前不能播放、录音或切换音频设备。';
       if (!actionMessage && value.audioInputDevice) {
         showAction('输入：' + (inputLabels[inputControl.value] || inputControl.value) + '（设备：' + value.audioInputDevice + '，通道：' + (transportLabels[value.audioInputTransport] || value.audioInputTransport || '未知') + '）；输出：' + (outputLabels[outputControl.value] || outputControl.value));
       }
@@ -527,13 +686,18 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     voiceChatButton.addEventListener('click', async () => {
       const starting = !voiceChatActive;
       voiceChatButton.disabled = true;
+      if (starting) beginDialTone();
       voiceChatStatus.textContent = starting ? '正在启动 Voice Chat...' : '正在挂断 Voice Chat...';
       try {
         const response = await fetch(starting ? '/api/voice-chat/start' : '/api/voice-chat/stop', { method: 'POST' });
         const value = await response.json();
         if (!response.ok) throw new Error(value.error || 'Voice Chat 控制失败');
         updateMeters(value);
+        if (starting && value.voiceChatActive === true && value.voiceChatPhase === 'connected') stopDialTone();
+        if (starting && value.voiceChatActive !== true && value.voiceChatPhase === 'error') finishCallTone(true);
+        if (!starting && value.voiceChatActive !== true) finishCallTone(true);
       } catch (error) {
+        if (starting) finishCallTone(true);
         voiceChatStatus.textContent = error.message || String(error);
         await poll();
       }
