@@ -11,6 +11,23 @@ INMO 官方公开的 AIR3 SDK/示例目前以 Unity 为主。公开的 `air3_cor
 3. 如果 AIR3 只产生可靠单击、不产生可靠抬起，在设置中固定使用“两次单击”模式。
 4. 只有拿到 INMO 提供、且不依赖 UnityPlayer 的原生 Android AAR/API 后，才在 `input/` 下加薄适配器；业务、网络、音频和 HUD 不依赖厂商层。
 
+## 2026-08-20 实机设备枚举
+
+`adb shell getevent -lp` 在当前 AIR3 上看到的输入设备如下。这里只记录系统暴露的能力，不把它们绑定到业务动作：
+
+| Linux device | name | capabilities |
+| --- | --- | --- |
+| `/dev/input/event3` | `iqs7211e_keys` | `KEY_ENTER`, `KEY_UP`, `KEY_LEFT`, `KEY_RIGHT`, `KEY_DOWN`, `KEY_BACK`, `KEY_HOMEPAGE` |
+| `/dev/input/event1` | `pmic_pwrkey` | `KEY_POWER` |
+| `/dev/input/event2` | `pmic_resin` | `KEY_VOLUMEDOWN` |
+| `/dev/input/event0` | `gpio-keys` | `KEY_VOLUMEUP` |
+| `/dev/input/event5` | `INMO Touchpad Consumer Control` | media, volume, power and navigation consumer keys |
+| `/dev/input/event6` | `INMO Touchpad` | pointer coordinates and `BTN_TOUCH` |
+
+一次实机抓取已经确认 `event3` 会产生 `KEY_ENTER`、`KEY_LEFT`、`KEY_RIGHT`，实体音量键会分别产生 `KEY_VOLUMEDOWN`、`KEY_VOLUMEUP`，电源键会产生 `KEY_POWER`。物理动作与这些事件的最终对应关系仍需用探针逐个记录，不能据此直接推断 PTT 或会话切换。
+
+公开的 `air3_core-debug.aar` 只包含 ATW、IMU、VIO、显示和 Ring 相关类及 native 库，未发现可供原生 Activity 直接注册镜腿按键回调的 API；公开 SDK 仍然是 Unity 集成路径。
+
 ## 输入探针
 
 安装 debug APK 后执行：

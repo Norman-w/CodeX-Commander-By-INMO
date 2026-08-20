@@ -8,5 +8,11 @@
             android:noHistory="true"
             android:permission="android.permission.DUMP"
             android:theme="@android:style/Theme.NoDisplay" />
+        <activity
+            android:name=".InputProbeActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:screenOrientation="landscape"
+            android:theme="@style/Theme.CodeXCommander" />
     </application>
 </manifest>
