@@ -161,7 +161,7 @@
           "properties": {
             "type": {
               "type": "string",
-              "const": "task_select"
+              "const": "voice_target_select"
             },
             "requestId": {
               "type": "string",
@@ -177,6 +177,24 @@
             "type",
             "requestId",
             "threadId"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "voice_target_new"
+            },
+            "requestId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "type",
+            "requestId"
           ],
           "additionalProperties": false
         },
@@ -429,6 +447,21 @@
                   "type": "null"
                 }
               ]
+            },
+            "voiceChatActive": {
+              "type": "boolean",
+              "default": false
+            },
+            "voiceChatPhase": {
+              "type": "string",
+              "enum": [
+                "starting",
+                "connected",
+                "stopping",
+                "stopped",
+                "error"
+              ],
+              "default": "stopped"
             },
             "activeTurnId": {
               "anyOf": [

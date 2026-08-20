@@ -175,20 +175,9 @@ export class CommanderBridge {
       throw new Error("语音引擎未配置；Core realtime 需要可用的 Codex app-server");
     }
     await this.codex.start();
-    this.voiceChatPhase = "starting";
-    try {
-      await this.voice.probeRealtime();
-      this.voiceChatActive = true;
-      this.voiceChatPhase = "connected";
-      this.voiceChatError = undefined;
-      this.logger.info("Core realtime session ready");
-    } catch (error) {
-      this.voiceChatActive = false;
-      this.voiceChatPhase = "error";
-      this.voiceChatError = error instanceof Error ? error.message : String(error);
-      await this.codex.stop().catch(() => undefined);
-      throw error;
-    }
+    this.voiceChatActive = false;
+    this.voiceChatPhase = "stopped";
+    this.voiceChatError = undefined;
     this.ready = true;
     return pairing;
   }
@@ -210,6 +199,27 @@ export class CommanderBridge {
   validateMediaToken(deviceId: string, token: string): boolean { return this.pairing.isTokenValid(deviceId, token); }
   getLocalAudioOutput(): LocalAudioOutput { return this.localAudioOutput; }
   getAudioInputSource(): AudioInputSource { return this.audioInputSource; }
+  async getVoiceTargetState(): Promise<Record<string, unknown>> {
+    return {
+      selectedThreadId: this.codex.getSelectedThreadId(),
+      threads: await this.codex.listVoiceTargets(),
+      voiceChatActive: this.voiceChatActive,
+      voiceChatPhase: this.voiceChatPhase,
+    };
+  }
+
+  async selectVoiceTarget(threadId: string): Promise<void> {
+    this.assertVoiceTargetUnlocked();
+    await this.codex.selectVoiceTarget(threadId);
+    await this.broadcastStateSync();
+  }
+
+  async createVoiceTarget(): Promise<void> {
+    this.assertVoiceTargetUnlocked();
+    await this.codex.createNewThread();
+    await this.broadcastStateSync();
+  }
+
   getAudioDiagnostics(): Record<string, unknown> {
     const now = Date.now();
     return {
@@ -274,10 +284,12 @@ export class CommanderBridge {
       this.voiceChatActive = true;
       this.voiceChatPhase = "connected";
       this.logger.info("Voice Chat master switch started");
+      await this.broadcastStateSync();
     } catch (error) {
       this.voiceChatActive = false;
       this.voiceChatPhase = "error";
       this.voiceChatError = error instanceof Error ? error.message : String(error);
+      await this.broadcastStateSync();
       throw error;
     }
   }
@@ -297,6 +309,7 @@ export class CommanderBridge {
       this.voiceChatPhase = "stopped";
       this.diagnosticInputActive = false;
       this.logger.info("Voice Chat master switch stopped");
+      await this.broadcastStateSync();
     } catch (error) {
       this.voiceChatPhase = "error";
       this.voiceChatError = error instanceof Error ? error.message : String(error);
@@ -451,6 +464,7 @@ export class CommanderBridge {
         await this.sendStateSync(session);
         break;
       case "ptt_start":
+        if (!this.voiceChatActive) throw new BridgeError("voice_chat_inactive", "请先选择 Codex 会话并拨打电话", true);
         if (this.diagnosticInputActive) throw new BridgeError("audio_test_active", "电脑音频测试正在进行", true);
         if (session.pttActive) throw new BridgeError("ptt_already_active", "PTT 已经处于录音状态", true);
         if (this.audioResponseActive) {
@@ -477,9 +491,11 @@ export class CommanderBridge {
           throw error;
         }
         break;
-      case "task_select":
-        await this.codex.selectThread(message.threadId);
-        await this.sendStateSync(session);
+      case "voice_target_select":
+        await this.selectVoiceTarget(message.threadId);
+        break;
+      case "voice_target_new":
+        await this.createVoiceTarget();
         break;
       case "task_command":
         await this.codex.sendCommand(message.text, message.threadId);
@@ -581,12 +597,26 @@ export class CommanderBridge {
     session.transport.sendControl(this.journal.create({
       type: "state_sync",
       selectedThreadId: this.codex.getSelectedThreadId(),
+      voiceChatActive: this.voiceChatActive,
+      voiceChatPhase: this.voiceChatPhase,
       activeTurnId: this.codex.getActiveTurnId(),
-      threads: await this.codex.listThreads(),
+      threads: await this.codex.listVoiceTargets(),
       pendingApproval: this.codex.getPendingApproval(),
       latestSummary: this.codex.getLatestFinal() || null,
       images: this.imageCards
     }, false));
+  }
+
+  private async broadcastStateSync(): Promise<void> {
+    for (const session of this.sessions.values()) {
+      if (session.authenticated) await this.sendStateSync(session);
+    }
+  }
+
+  private assertVoiceTargetUnlocked(): void {
+    if (this.voiceChatActive || this.voiceChatPhase === "starting" || this.voiceChatPhase === "stopping") {
+      throw new BridgeError("voice_chat_active", "通话中不能切换目标，请先挂断电话", true);
+    }
   }
 
   private publishImage(image: ImageCard): void {

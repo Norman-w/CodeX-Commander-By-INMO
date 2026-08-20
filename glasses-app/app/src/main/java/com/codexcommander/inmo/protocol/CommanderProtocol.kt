@@ -56,6 +56,8 @@ sealed interface ServerMessage {
     data class StateSync(
         override val eventId: Long,
         val selectedThreadId: String?,
+        val voiceChatActive: Boolean,
+        val voiceChatPhase: String,
         val activeTurnId: String?,
         val threads: List<ThreadSummary>,
         val pendingApproval: ApprovalCard?,
@@ -122,9 +124,10 @@ object CommanderProtocol {
     fun reportRequest(threadId: String?): String = json.encodeToString(
         OptionalThreadRequest(type = "report_request", requestId = requestId(), threadId = threadId),
     )
-    fun selectTask(threadId: String): String = json.encodeToString(
-        ThreadRequest(type = "task_select", requestId = requestId(), threadId = threadId),
+    fun selectVoiceTarget(threadId: String): String = json.encodeToString(
+        ThreadRequest(type = "voice_target_select", requestId = requestId(), threadId = threadId),
     )
+    fun newVoiceTarget(): String = json.encodeToString(SimpleRequest(type = "voice_target_new", requestId = requestId()))
     fun interrupt(threadId: String?): String = json.encodeToString(
         OptionalThreadRequest(type = "task_interrupt", requestId = requestId(), threadId = threadId),
     )
@@ -149,6 +152,8 @@ object CommanderProtocol {
                 ServerMessage.StateSync(
                     it.eventId,
                     it.selectedThreadId,
+                    it.voiceChatActive,
+                    it.voiceChatPhase,
                     it.activeTurnId,
                     it.threads,
                     it.pendingApproval,
@@ -261,6 +266,8 @@ private data class HelloAckWire(val eventId: Long, val deviceToken: String? = nu
 private data class StateSyncWire(
     val eventId: Long,
     val selectedThreadId: String? = null,
+    val voiceChatActive: Boolean = false,
+    val voiceChatPhase: String = "stopped",
     val activeTurnId: String? = null,
     val threads: List<ThreadSummary>,
     val pendingApproval: ApprovalCard? = null,

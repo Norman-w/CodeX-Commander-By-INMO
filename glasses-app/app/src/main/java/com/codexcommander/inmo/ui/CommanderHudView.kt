@@ -216,6 +216,7 @@ class CommanderHudView @JvmOverloads constructor(
             state.listening && state.pttMode == PttMode.HOLD -> "正在听 · 松开提交"
             state.listening -> "正在听 · 轻触提交"
             state.playing -> "正在播报 · 按住可打断"
+            !state.voiceChatActive -> "未拨号 · 先选择会话"
             state.pttMode == PttMode.HOLD -> "按住说话"
             else -> "轻触说话"
         }
@@ -322,7 +323,8 @@ class CommanderHudView @JvmOverloads constructor(
             state.completionAwaitingReport -> "轻触播放汇报 · 按住可继续说话"
             state.playing -> "正在播报 · 按住可打断并说话"
             state.activeTurnId != null -> "按住可补充指令 · 完成后才能切换任务"
-            state.threads.size > 1 -> "下滑选择会话 · 左右切换 · 按住说话"
+            !state.voiceChatActive -> "下滑选择会话 · 上下移动 · 电脑拨号后按住说话"
+            state.threads.size > 1 -> "下滑选择会话 · 上下移动 · 按住说话"
             state.pttMode == PttMode.TOGGLE -> "轻触开始说话 · 再次轻触提交"
             else -> "按住说话 · 松开提交 · 空闲时麦克风关闭"
         }
@@ -338,7 +340,7 @@ class CommanderHudView @JvmOverloads constructor(
         canvas.drawText("选择 Voice Chat 会话", left, top, paint)
         paint.isFakeBoldText = false
 
-        val selectedIndex = state.threads.indexOfFirst { it.id == state.selectedThreadId }.coerceAtLeast(0)
+        val selectedIndex = if (state.threadPickerNew) state.threads.lastIndex else state.threads.indexOfFirst { it.id == state.selectedThreadId }.coerceAtLeast(0)
         val first = (selectedIndex - 2).coerceIn(0, (state.threads.size - PICKER_ROWS).coerceAtLeast(0))
         state.threads.drop(first).take(PICKER_ROWS).forEachIndexed { offset, thread ->
             val selected = thread.id == state.selectedThreadId
@@ -358,9 +360,21 @@ class CommanderHudView @JvmOverloads constructor(
             drawEllipsized(canvas, HudText.threadStatusLabel(thread.status), left + sp(18), rowTop + sp(18), right - left - sp(18))
         }
 
+        val newRowTop = top + sp(22) + PICKER_ROWS * sp(54)
+        if (state.threadPickerNew) {
+            paint.color = COLOR_PANEL
+            canvas.drawRoundRect(RectF(left - sp(8), newRowTop - sp(24), right, newRowTop + sp(18)), sp(8), sp(8), paint)
+        }
+        paint.color = if (state.threadPickerNew) COLOR_ACCENT else COLOR_MUTED
+        paint.textSize = sp(18)
+        canvas.drawText(if (state.threadPickerNew) ">" else "+", left, newRowTop, paint)
+        paint.color = if (state.threadPickerNew) COLOR_WHITE else COLOR_MUTED
+        paint.textSize = sp(19)
+        canvas.drawText("新建 Codex 会话", left + sp(18), newRowTop, paint)
+
         paint.color = COLOR_MUTED
         paint.textSize = sp(17)
-        drawEllipsized(canvas, "下滑打开 · 上滑关闭 · 左右切换 · 轻触完成", left, bottom, right - left)
+        drawEllipsized(canvas, "上下移动 · 轻触选择 · 再拨打电话", left, bottom, right - left)
     }
 
     private fun drawApproval(canvas: Canvas, left: Float, right: Float, top: Float, bottom: Float) {
@@ -519,7 +533,7 @@ class CommanderHudView @JvmOverloads constructor(
         const val HOLD_DELAY_MS = 180L
         const val SWIPE_DISTANCE = 80f
         const val TOUCH_SLOP = 28f
-        const val PICKER_ROWS = 5
+        const val PICKER_ROWS = 4
         val COLOR_PANEL = Color.rgb(24, 43, 55)
         val COLOR_WHITE = Color.rgb(247, 251, 255)
         val COLOR_ACCENT = Color.rgb(56, 215, 255)

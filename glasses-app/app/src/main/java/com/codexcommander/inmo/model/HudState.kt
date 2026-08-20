@@ -20,6 +20,8 @@ data class HudContextLine(
 
 data class HudState(
     val connection: ConnectionState = ConnectionState.UNCONFIGURED,
+    val voiceChatActive: Boolean = false,
+    val voiceChatPhase: String = "stopped",
     val pttMode: PttMode = PttMode.HOLD,
     val microphoneGranted: Boolean = false,
     val setupRequired: Boolean = false,
@@ -30,6 +32,7 @@ data class HudState(
     val activeTurnId: String? = null,
     val threads: List<ThreadSummary> = emptyList(),
     val threadPickerOpen: Boolean = false,
+    val threadPickerNew: Boolean = false,
     val recentContext: List<HudContextLine> = emptyList(),
     val taskPhase: String = "idle",
     val taskMessage: String = "启动后按住眼镜腿说话",

@@ -147,7 +147,10 @@ class CommanderController(context: Context) : BridgeClient.Listener {
     fun onSingleTap() {
         val current = mutableState.value
         when {
-            current.threadPickerOpen -> update { it.copy(threadPickerOpen = false, error = null) }
+            current.threadPickerOpen -> {
+                if (current.threadPickerNew) createNewVoiceTarget()
+                else update { it.copy(threadPickerOpen = false, threadPickerNew = false, error = null) }
+            }
             current.pendingApproval != null -> Unit
             current.imageVisible -> update { it.copy(imageVisible = false, imageBitmap = null, imageError = null) }
             current.completionAwaitingReport -> requestReport()
@@ -188,6 +191,14 @@ class CommanderController(context: Context) : BridgeClient.Listener {
             }
             return
         }
+        if (current.threadPickerOpen) {
+            if (current.voiceChatActive) {
+                update { it.copy(error = "通话中不能切换目标，请先在电脑上挂断") }
+                return
+            }
+            moveThreadSelection(if (direction > 0) 1 else -1)
+            return
+        }
         if (current.activeTurnId != null && current.threads.size > 1) {
             update { it.copy(error = "Codex 正在执行，完成或中断后才能切换任务") }
             return
@@ -196,7 +207,7 @@ class CommanderController(context: Context) : BridgeClient.Listener {
             val selected = current.threads.indexOfFirst { it.id == current.selectedThreadId }.coerceAtLeast(0)
             val next = (selected + if (direction > 0) 1 else -1).mod(current.threads.size)
             val thread = current.threads[next]
-            if (bridge.sendControl(CommanderProtocol.selectTask(thread.id))) {
+            if (bridge.sendControl(CommanderProtocol.selectVoiceTarget(thread.id))) {
                 update { it.copy(selectedThreadId = thread.id, taskMessage = "已切换到：${thread.title}", error = null) }
             } else {
                 update { it.copy(error = "任务未切换，请等待连接恢复") }
@@ -206,16 +217,18 @@ class CommanderController(context: Context) : BridgeClient.Listener {
 
     fun onVerticalSwipe(direction: Int) {
         val current = mutableState.value
-        if (current.pendingApproval != null || current.imageVisible || current.threads.isEmpty()) return
+        if (current.pendingApproval != null || current.imageVisible) return
         if (!current.threadPickerOpen) {
-            if (direction > 0) update { it.copy(threadPickerOpen = true, error = null) }
+            if (direction > 0 && current.threads.isNotEmpty() && !current.voiceChatActive) {
+                update { it.copy(threadPickerOpen = true, threadPickerNew = false, error = null) }
+            }
             return
         }
-        if (direction < 0) {
-            update { it.copy(threadPickerOpen = false, error = null) }
+        if (current.voiceChatActive) {
+            update { it.copy(error = "通话中不能切换目标，请先在电脑上挂断") }
             return
         }
-        onHorizontalSwipe(1)
+        moveThreadSelection(if (direction > 0) 1 else -1)
     }
 
     fun interrupt() {
@@ -299,10 +312,13 @@ class CommanderController(context: Context) : BridgeClient.Listener {
                     }
                     it.copy(
                         connection = ConnectionState.CONNECTED,
+                        voiceChatActive = message.voiceChatActive,
+                        voiceChatPhase = message.voiceChatPhase,
                         selectedThreadId = message.selectedThreadId,
                         activeTurnId = message.activeTurnId,
                         threads = message.threads,
                         threadPickerOpen = if (message.selectedThreadId != current.selectedThreadId) false else it.threadPickerOpen,
+                        threadPickerNew = if (message.selectedThreadId != current.selectedThreadId) false else it.threadPickerNew,
                         recentContext = if (syncContext.isNotEmpty()) syncContext
                             else if (message.selectedThreadId != current.selectedThreadId) emptyList()
                             else it.recentContext,
@@ -319,7 +335,7 @@ class CommanderController(context: Context) : BridgeClient.Listener {
                                 ?.preview
                                 ?.takeIf(String::isNotBlank)
                                 ?: it.taskMessage
-                            else -> "尚无眼镜任务，按住说出第一条开发指令"
+                            else -> "先在 Code X 选择会话并拨打电话"
                         },
                         completionAwaitingReport = unreportedSummary != null,
                         reconnectDelaySeconds = null,
@@ -551,6 +567,11 @@ class CommanderController(context: Context) : BridgeClient.Listener {
             update { it.copy(error = "Mac 连接尚未就绪，请稍后再试") }
             return
         }
+        if (!current.voiceChatActive) {
+            ptt.forceStop()
+            update { it.copy(error = "请先在 Code X 选择 Codex 会话并拨打电话") }
+            return
+        }
         liveUserCaptionSeen = false
         liveAssistantCaptionSeen = false
         player.stop()
@@ -578,6 +599,49 @@ class CommanderController(context: Context) : BridgeClient.Listener {
         update {
             if (sent) it.copy(listening = false, taskPhase = "queued", error = null)
             else it.copy(listening = false, error = "语音未送达，请等待连接恢复后重试")
+        }
+    }
+
+    private fun moveThreadSelection(step: Int) {
+        val current = mutableState.value
+        if (current.activeTurnId != null) {
+            update { it.copy(error = "Codex 正在执行，完成或中断后才能切换通话目标") }
+            return
+        }
+        if (current.threadPickerNew) {
+            if (step < 0 && current.threads.isNotEmpty()) {
+                val thread = current.threads.last()
+                if (bridge.sendControl(CommanderProtocol.selectVoiceTarget(thread.id))) {
+                    update { it.copy(threadPickerNew = false, selectedThreadId = thread.id, taskMessage = "已选择：${thread.title}", error = null) }
+                }
+            }
+            return
+        }
+        val selected = current.threads.indexOfFirst { it.id == current.selectedThreadId }.coerceAtLeast(0)
+        val next = selected + step
+        if (next >= current.threads.size) {
+            update { it.copy(threadPickerNew = true, error = null) }
+            return
+        }
+        if (next < 0) return
+        val thread = current.threads[next]
+        if (bridge.sendControl(CommanderProtocol.selectVoiceTarget(thread.id))) {
+            update { it.copy(selectedThreadId = thread.id, taskMessage = "已选择：${thread.title}", error = null) }
+        } else {
+            update { it.copy(error = "通话目标未切换，请等待连接恢复") }
+        }
+    }
+
+    private fun createNewVoiceTarget() {
+        val current = mutableState.value
+        if (current.voiceChatActive) {
+            update { it.copy(error = "通话中不能新建目标，请先在电脑上挂断") }
+            return
+        }
+        val sent = bridge.sendControl(CommanderProtocol.newVoiceTarget())
+        update {
+            if (sent) it.copy(threadPickerOpen = false, threadPickerNew = false, taskMessage = "正在新建 Codex 会话…", error = null)
+            else it.copy(error = "新会话请求未送达，请等待连接恢复")
         }
     }
 

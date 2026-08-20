@@ -130,7 +130,7 @@ export class HttpWsServer {
 
   private async handleHttp(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
-    if (url.pathname === "/" || url.pathname === "/api/settings" || url.pathname === "/api/audio-levels" || url.pathname === "/api/voice-chat/start" || url.pathname === "/api/voice-chat/stop" || url.pathname === "/api/audio-test/start" || url.pathname === "/api/audio-test/stop" || url.pathname === "/api/audio-test/sample") {
+    if (url.pathname === "/" || url.pathname === "/api/settings" || url.pathname === "/api/voice-chat/targets" || url.pathname === "/api/voice-chat/target" || url.pathname === "/api/audio-levels" || url.pathname === "/api/voice-chat/start" || url.pathname === "/api/voice-chat/stop" || url.pathname === "/api/audio-test/start" || url.pathname === "/api/audio-test/stop" || url.pathname === "/api/audio-test/sample") {
       if (!isLocalRequest(request)) return json(response, 403, { error: "management page is local-only" });
       if (request.method === "GET" && url.pathname === "/") return html(response, MANAGEMENT_PAGE);
       if (request.method === "GET" && url.pathname === "/api/settings") {
@@ -140,6 +140,21 @@ export class HttpWsServer {
           inputOptions: ["visor", "mac"],
           outputOptions: ["visor_only", "mac_only", "mac_and_visor"]
         });
+      }
+      if (request.method === "GET" && url.pathname === "/api/voice-chat/targets") {
+        return json(response, 200, await this.bridge.getVoiceTargetState());
+      }
+      if (request.method === "PUT" && url.pathname === "/api/voice-chat/target") {
+        const payload = await readJson(request);
+        const record = isRecord(payload) ? payload : {};
+        if (record.newSession === true) {
+          await this.bridge.createVoiceTarget();
+        } else if (typeof record.threadId === "string" && record.threadId.trim()) {
+          await this.bridge.selectVoiceTarget(record.threadId);
+        } else {
+          return json(response, 400, { error: "请选择 Codex 会话或新建会话" });
+        }
+        return json(response, 200, await this.bridge.getVoiceTargetState());
       }
       if (request.method === "GET" && url.pathname === "/api/audio-levels") {
         return json(response, 200, this.bridge.getAudioDiagnostics());
@@ -360,6 +375,7 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     .call-action-note { margin-top: 5px; color: var(--dim); font: 10px "SF Mono", Menlo, monospace; }
     .control-dock { width: min(620px, 100%); margin-top: 38px; padding: 16px; border: 1px solid var(--line); background: var(--panel); box-shadow: 0 24px 80px rgba(0,0,0,.2); backdrop-filter: blur(18px); }
     .control-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .target-field { grid-column: 1 / -1; }
     .field { display: grid; gap: 8px; text-align: left; }
     .field-label { color: var(--dim); font: 10px "SF Mono", Menlo, monospace; letter-spacing: .12em; text-transform: uppercase; }
     .field-note { color: var(--dim); font-size: 11px; }
@@ -439,6 +455,7 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
         </div>
         <div class="control-dock">
           <div class="control-grid">
+            <label class="field target-field"><span class="field-label">拨给谁</span><select id="voiceTarget" disabled><option value="">正在读取 Codex 会话...</option></select><span class="field-note">拨号前选择历史会话或新建会话；接通后目标锁定。</span></label>
             <label class="field"><span class="field-label">输入来源</span><select id="audioInput" disabled><option value="mac">电脑麦克风</option><option value="visor">眼镜麦克风</option></select><span class="field-note">电脑麦克风，或眼镜按住 PTT。</span></label>
             <label class="field"><span class="field-label">回复播放到</span><select id="localAudio" disabled><option value="mac_and_visor">电脑 + 眼镜</option><option value="mac_only">仅电脑</option><option value="visor_only">仅眼镜</option></select><span class="field-note">选择 Code X 的声音播放位置。</span></label>
           </div>
@@ -463,6 +480,7 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     </section>
   </main>
   <script>
+    const voiceTargetControl = document.querySelector('#voiceTarget');
     const inputControl = document.querySelector('#audioInput');
     const outputControl = document.querySelector('#localAudio');
     const voiceChatButton = document.querySelector('#voiceChatButton');
@@ -516,6 +534,38 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     const clamp = (value) => Math.max(0, Math.min(1, Number(value) || 0));
     const meterWidth = (level) => Math.min(100, Math.max(0, Math.round(clamp(level.peak) * 100)));
     const showAction = (message) => { actionMessage = message; status.textContent = message; };
+    const targetTime = (updatedAt) => {
+      if (!Number.isFinite(Number(updatedAt))) return '';
+      return new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(Number(updatedAt)));
+    };
+    const updateVoiceTargetState = (value) => {
+      const threads = Array.isArray(value.threads) ? value.threads : [];
+      const selected = typeof value.selectedThreadId === 'string' ? value.selectedThreadId : '';
+      const previous = voiceTargetControl.value;
+      voiceTargetControl.replaceChildren();
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = threads.length ? '请选择通话会话' : '暂无可用 Codex 会话';
+      voiceTargetControl.appendChild(placeholder);
+      threads.forEach((thread, index) => {
+        const option = document.createElement('option');
+        option.value = thread.id;
+        const time = targetTime(thread.updatedAt);
+        const preview = String(thread.preview || '').replace(/\s+/g, ' ').slice(0, 42);
+        option.textContent = [thread.title || '未命名 Codex', time, preview].filter(Boolean).join(' · ');
+        option.dataset.order = String(index);
+        voiceTargetControl.appendChild(option);
+      });
+      const newOption = document.createElement('option');
+      newOption.value = '__new__';
+      newOption.textContent = '＋ 新建 Codex 会话';
+      voiceTargetControl.appendChild(newOption);
+      if (selected && threads.some((thread) => thread.id === selected)) voiceTargetControl.value = selected;
+      else if (previous && [...voiceTargetControl.options].some((option) => option.value === previous)) voiceTargetControl.value = previous;
+      else voiceTargetControl.value = '';
+      const phase = value.voiceChatPhase || (value.voiceChatActive ? 'connected' : 'stopped');
+      voiceTargetControl.disabled = value.voiceChatActive === true || phase === 'starting' || phase === 'stopping';
+    };
     const setLogOpen = (open) => {
       logPanel.dataset.open = String(open);
       logBackdrop.dataset.open = String(open);
@@ -782,6 +832,7 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
       voiceChatButton.dataset.active = String(connected);
       voiceChatButton.setAttribute('aria-label', connected ? '挂断电话' : '拨打电话');
       voiceChatButtonLabel.textContent = connected ? '挂断电话' : phase === 'starting' ? '拨号中...' : '拨打电话';
+      voiceTargetControl.disabled = phase === 'connected' || phase === 'starting' || phase === 'stopping';
       inputControl.disabled = !connected;
       outputControl.disabled = !connected;
       sampleButton.disabled = !connected || testActive;
@@ -816,6 +867,15 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     async function load() {
       const response = await fetch('/api/settings', { cache: 'no-store' });
       updateStatus(await response.json());
+      const targets = await fetch('/api/voice-chat/targets', { cache: 'no-store' });
+      if (!targets.ok) throw new Error('无法读取 Codex 会话列表');
+      updateVoiceTargetState(await targets.json());
+    }
+    async function pollVoiceTargets() {
+      try {
+        const response = await fetch('/api/voice-chat/targets', { cache: 'no-store' });
+        if (response.ok) updateVoiceTargetState(await response.json());
+      } catch { /* bridge may be restarting */ }
     }
     async function saveSettings() {
       inputControl.disabled = true;
@@ -829,8 +889,31 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     }
     inputControl.addEventListener('change', () => { actionMessage = ''; saveSettings().catch((error) => showAction(error.message)); });
     outputControl.addEventListener('change', () => { actionMessage = ''; saveSettings().catch((error) => showAction(error.message)); });
+    voiceTargetControl.addEventListener('change', async () => {
+      const target = voiceTargetControl.value;
+      if (!target) return;
+      voiceTargetControl.disabled = true;
+      try {
+        const response = await fetch('/api/voice-chat/target', {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(target === '__new__' ? { newSession: true } : { threadId: target }),
+        });
+        const value = await response.json();
+        if (!response.ok) throw new Error(value.error || '通话目标切换失败');
+        updateVoiceTargetState(value);
+        showAction('通话目标已锁定为：' + (voiceTargetControl.selectedOptions[0]?.textContent || '新会话'));
+      } catch (error) {
+        showAction(error.message || String(error));
+        await pollVoiceTargets();
+      }
+    });
     voiceChatButton.addEventListener('click', async () => {
       const starting = !voiceChatActive;
+      if (starting && !voiceTargetControl.value) {
+        showAction('请先选择要拨打的 Codex 会话，或新建会话。');
+        return;
+      }
       voiceChatButton.disabled = true;
       if (starting) {
         beginDialTone();
@@ -929,7 +1012,9 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     }
     load().catch(() => { status.textContent = '无法读取 Bridge 状态'; });
     poll();
+    pollVoiceTargets();
     setInterval(poll, 160);
+    setInterval(pollVoiceTargets, 1500);
   </script>
 </body>
 </html>`;

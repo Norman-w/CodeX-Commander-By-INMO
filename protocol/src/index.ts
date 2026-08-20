@@ -72,9 +72,13 @@ export const ClientControlMessageSchema = z.discriminatedUnion("type", [
     requestId: RequestIdSchema
   }),
   z.object({
-    type: z.literal("task_select"),
+    type: z.literal("voice_target_select"),
     requestId: RequestIdSchema,
     threadId: IdSchema
+  }),
+  z.object({
+    type: z.literal("voice_target_new"),
+    requestId: RequestIdSchema
   }),
   z.object({
     type: z.literal("task_command"),
@@ -133,6 +137,8 @@ export const ServerControlMessageSchema = z.discriminatedUnion("type", [
   ServerEventBaseSchema.extend({
     type: z.literal("state_sync"),
     selectedThreadId: IdSchema.nullable(),
+    voiceChatActive: z.boolean().default(false),
+    voiceChatPhase: z.enum(["starting", "connected", "stopping", "stopped", "error"]).default("stopped"),
     activeTurnId: IdSchema.nullable(),
     threads: z.array(ThreadSummarySchema).max(100),
     pendingApproval: ApprovalCardSchema.nullable(),

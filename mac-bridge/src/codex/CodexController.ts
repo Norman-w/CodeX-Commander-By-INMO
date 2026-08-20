@@ -193,6 +193,15 @@ export class CodexController {
     return tasks;
   }
 
+  async listVoiceTargets(): Promise<ThreadSummary[]> {
+    const records = await this.listThreadRecords();
+    const targets = records.map((thread) => toThreadSummary(thread, this.config.cwd));
+    if (this.selectedThreadSummary && !targets.some((thread) => thread.id === this.selectedThreadSummary?.id)) {
+      targets.unshift(this.selectedThreadSummary);
+    }
+    return targets;
+  }
+
   private async listThreadRecords(): Promise<Thread[]> {
     const params: ThreadListParams = {
       limit: 100,
@@ -215,6 +224,32 @@ export class CodexController {
       throw new Error("该任务不属于当前配置的 Codex 工作目录");
     }
     await this.resumeThread(threadId);
+  }
+
+  async selectVoiceTarget(threadId: string): Promise<void> {
+    if (this.activeTurnId) {
+      throw new Error("Codex 正在执行，完成或中断后才能切换通话目标");
+    }
+    const available = await this.listVoiceTargets();
+    if (!available.some((thread) => thread.id === threadId)) {
+      throw new Error("该 Codex 会话不属于当前配置的工作目录");
+    }
+    await this.resumeThread(threadId);
+  }
+
+  async createNewThread(): Promise<ThreadSummary> {
+    if (this.activeTurnId) {
+      throw new Error("Codex 正在执行，完成或中断后才能新建通话会话");
+    }
+    this.selectedThreadId = null;
+    this.selectedThreadSummary = null;
+    this.activeTurnId = null;
+    this.latestFinal = "";
+    const threadId = await this.ensureSelectedThread();
+    const created = (await this.listVoiceTargets()).find((thread) => thread.id === threadId);
+    if (created) return created;
+    if (this.selectedThreadSummary) return this.selectedThreadSummary;
+    throw new Error("新 Codex 会话创建后无法读取会话信息");
   }
 
   private async resumeThread(threadId: string): Promise<void> {
