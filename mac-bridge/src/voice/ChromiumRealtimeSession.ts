@@ -156,6 +156,10 @@ const PAGE_SOURCE = String.raw`<!doctype html>
           }
           send({ type: 'input-active', active: inputActive });
         }
+        if (message.type === 'reset') {
+          window.location.reload();
+          return;
+        }
         if (message.type === 'close') {
           window.close();
         }
@@ -347,6 +351,7 @@ export class ChromiumRealtimeSession extends EventEmitter {
   private threadId?: string;
   private remoteSampleRate = 48_000;
   private offerRequested = false;
+  private pageResetPending = false;
   private connected = false;
   private pendingSdp?: string;
   private resolveStart?: () => void;
@@ -372,7 +377,15 @@ export class ChromiumRealtimeSession extends EventEmitter {
   private localAudioOutput: LocalAudioOutput = "mac_and_visor";
 
   public async start(threadId: string): Promise<void> {
-    await this.close();
+    const reuseBrowser = Boolean(
+      this.chrome &&
+      this.chrome.exitCode === null &&
+      this.httpServer?.listening &&
+      this.socketServer,
+    );
+    if (!reuseBrowser) {
+      await this.close();
+    }
     this.threadId = threadId;
     this.remoteSampleRate = 48_000;
     this.remoteAudioFrames = 0;
@@ -381,6 +394,7 @@ export class ChromiumRealtimeSession extends EventEmitter {
     this.remoteAudibleFrames = 0;
     this.inputActive = false;
     this.offerRequested = false;
+    this.pageResetPending = reuseBrowser;
     this.connected = false;
 
     const started = new Promise<void>((resolve, reject) => {
@@ -391,7 +405,11 @@ export class ChromiumRealtimeSession extends EventEmitter {
     const timeout = setTimeout(() => this.failStart(new Error('Chromium realtime page did not connect in time')), START_TIMEOUT_MS);
 
     try {
-      await this.openLocalPage();
+      if (reuseBrowser) {
+        this.sendJson({ type: 'reset' });
+      } else {
+        await this.openLocalPage();
+      }
       await started;
     } catch (error) {
       this.failStart(asError(error));
@@ -402,6 +420,23 @@ export class ChromiumRealtimeSession extends EventEmitter {
       this.resolveStart = undefined;
       this.rejectStart = undefined;
     }
+  }
+
+  /** Stop the current call while keeping the Chromium host ready to reuse. */
+  public async suspend(): Promise<void> {
+    this.connected = false;
+    this.offerRequested = false;
+    this.pendingSdp = undefined;
+    this.inputActive = false;
+    this.threadId = undefined;
+    this.pageResetPending = true;
+
+    const rejectStart = this.rejectStart;
+    this.resolveStart = undefined;
+    this.rejectStart = undefined;
+    rejectStart?.(new Error('native realtime session suspended'));
+
+    this.sendJson({ type: 'reset' });
   }
 
   public appendInput(audio: Buffer): void {
@@ -454,6 +489,7 @@ export class ChromiumRealtimeSession extends EventEmitter {
   public async close(): Promise<void> {
     this.connected = false;
     this.offerRequested = false;
+    this.pageResetPending = false;
     this.pendingSdp = undefined;
 
     const reject = this.rejectStart;
@@ -587,6 +623,7 @@ export class ChromiumRealtimeSession extends EventEmitter {
   private attachSocket(socket: WebSocket): void {
     this.socket?.close();
     this.socket = socket;
+    this.pageResetPending = false;
     socket.binaryType = 'nodebuffer';
     socket.on('message', (raw: RawData, isBinary: boolean) => {
       if (isBinary) {
@@ -598,7 +635,7 @@ export class ChromiumRealtimeSession extends EventEmitter {
     socket.on('close', () => {
       if (this.socket !== socket) return;
       this.socket = undefined;
-      if (!this.connected) this.failStart(new Error('Chromium realtime control socket closed'));
+      if (!this.connected && !this.pageResetPending) this.failStart(new Error('Chromium realtime control socket closed'));
     });
     socket.on('error', () => {
       if (!this.connected) this.failStart(new Error('Chromium realtime control socket failed'));

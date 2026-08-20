@@ -137,7 +137,7 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
         });
       });
     }
-    await this.chromiumSession.close();
+    await this.chromiumSession.suspend();
     this.logger.info("Codex realtime session stopped by Voice Chat master switch");
   }
 
@@ -476,7 +476,7 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
     this.sessionActive = false;
     this.sessionReset = (async () => {
       if (threadId) await this.host.requestJsonRpc("thread/realtime/stop", { threadId }).catch(() => undefined);
-      await this.chromiumSession.close();
+      await this.chromiumSession.suspend();
     })().finally(() => {
       this.sessionReset = undefined;
     });
