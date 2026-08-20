@@ -354,6 +354,8 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
     const voiceEvents = document.querySelector('#voiceEvents');
     let testActive = false;
     let voiceChatActive = false;
+    let voiceTurnActive = false;
+    let pendingSample = false;
     let actionMessage = '';
     let managementSocket = null;
     let macCapture = null;
@@ -484,12 +486,20 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
       outputStatus.textContent = output.active ? '已收到返回' : '未收到返回';
       renderVoiceEvents(value.voiceEvents);
       testActive = value.testActive === true;
-      sampleButton.disabled = !voiceChatActive || testActive || value.voiceTurnActive === true;
-      testButton.disabled = !testActive && (!voiceChatActive || value.voiceTurnActive === true);
+      voiceTurnActive = value.voiceTurnActive === true;
+      sampleButton.disabled = !voiceChatActive || testActive;
+      sampleButton.textContent = voiceTurnActive
+        ? (pendingSample ? 'hi there 已排队' : '等待上一轮完成后发送 hi there')
+        : '发送测试 hi there';
+      testButton.disabled = !testActive && (!voiceChatActive || voiceTurnActive);
       testButton.dataset.active = String(testActive);
       testButton.textContent = testActive ? '停止音频测试' : '开始音频测试';
       if (!actionMessage && value.audioInputDevice) {
         showAction('输入：' + (inputLabels[inputControl.value] || inputControl.value) + '（设备：' + value.audioInputDevice + '，通道：' + (transportLabels[value.audioInputTransport] || value.audioInputTransport || '未知') + '）；输出：' + (outputLabels[outputControl.value] || outputControl.value));
+      }
+      if (pendingSample && !voiceTurnActive && voiceChatActive && !testActive) {
+        showAction('上一轮已结束，正在发送排队的 hi there 音频...');
+        void sendSample();
       }
     };
     const updateStatus = (value) => {
@@ -528,8 +538,9 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
         await poll();
       }
     });
-    sampleButton.addEventListener('click', async () => {
+    const sendSample = async () => {
       sampleButton.disabled = true;
+      pendingSample = false;
       showAction('正在发送已生成的 hi there 音频...');
       try {
         const response = await fetch('/api/audio-test/sample', { method: 'POST' });
@@ -540,8 +551,21 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
       } catch (error) {
         showAction(error.message || String(error));
       } finally {
-        sampleButton.disabled = false;
+        sampleButton.disabled = !voiceChatActive || testActive;
       }
+    };
+    sampleButton.addEventListener('click', async () => {
+      if (testActive) {
+        showAction('请先停止音频测试，再发送 hi there 音频');
+        return;
+      }
+      if (voiceTurnActive) {
+        pendingSample = true;
+        sampleButton.textContent = 'hi there 已排队';
+        showAction('上一轮音频仍在等待服务器返回；hi there 已排队，将在这一轮结束后自动发送');
+        return;
+      }
+      await sendSample();
     });
     testButton.addEventListener('click', async () => {
       testButton.disabled = true;
