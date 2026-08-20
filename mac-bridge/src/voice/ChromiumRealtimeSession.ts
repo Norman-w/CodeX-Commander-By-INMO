@@ -25,6 +25,7 @@ const PAGE_SOURCE = String.raw`<!doctype html>
   let remoteContext;
   let destination;
   let remoteMonitorGain;
+  let remoteAudioElement;
   let localOutputMode = 'visor_only';
   let inputSource = 'visor';
   let inputActive = false;
@@ -40,8 +41,15 @@ const PAGE_SOURCE = String.raw`<!doctype html>
   let events;
 
   const applyOutputRouting = () => {
+    const playOnMac = localOutputMode === 'mac_only' || localOutputMode === 'mac_and_visor';
     if (remoteMonitorGain) {
-      remoteMonitorGain.gain.value = localOutputMode === 'mac_only' || localOutputMode === 'mac_and_visor' ? 1 : 0;
+      // The hidden HTMLAudioElement is the native Chromium speaker sink. Keep
+      // this WebAudio branch silent so Mac + visor mode cannot double-play.
+      remoteMonitorGain.gain.value = 0;
+    }
+    if (remoteAudioElement) {
+      remoteAudioElement.muted = false;
+      remoteAudioElement.volume = playOnMac ? 1 : 0;
     }
   };
 
@@ -265,7 +273,7 @@ const PAGE_SOURCE = String.raw`<!doctype html>
           await remoteContext.resume();
         }
         const stream = event.streams[0] || new MediaStream([event.track]);
-        const remoteAudioElement = document.createElement('audio');
+        remoteAudioElement = document.createElement('audio');
         remoteAudioElement.autoplay = true;
         remoteAudioElement.playsInline = true;
         remoteAudioElement.volume = 0;
