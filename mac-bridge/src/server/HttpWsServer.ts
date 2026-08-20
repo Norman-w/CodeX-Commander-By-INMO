@@ -9,7 +9,7 @@ import WebSocket, { WebSocketServer, type RawData } from "ws";
 import { ClientControlMessageSchema } from "@codex-commander/protocol";
 
 import type { CommanderBridge } from "../bridge/CommanderBridge.js";
-import type { BridgeConfig, LocalAudioOutput } from "../config.js";
+import type { AudioInputSource, BridgeConfig, LocalAudioOutput } from "../config.js";
 import type { Logger } from "../log.js";
 
 export class HttpWsServer {
@@ -104,27 +104,49 @@ export class HttpWsServer {
 
   private async handleHttp(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
-    if (url.pathname === "/" || url.pathname === "/api/settings") {
+    if (url.pathname === "/" || url.pathname === "/api/settings" || url.pathname === "/api/audio-levels" || url.pathname === "/api/audio-test/start" || url.pathname === "/api/audio-test/stop") {
       if (!isLocalRequest(request)) return json(response, 403, { error: "management page is local-only" });
       if (request.method === "GET" && url.pathname === "/") return html(response, MANAGEMENT_PAGE);
       if (request.method === "GET" && url.pathname === "/api/settings") {
         return json(response, 200, {
+          audioInputSource: this.bridge.getAudioInputSource(),
           localAudioOutput: this.bridge.getLocalAudioOutput(),
-          default: "visor_only",
-          options: ["visor_only", "mac_only", "mac_and_visor"]
+          inputOptions: ["visor", "mac"],
+          outputOptions: ["visor_only", "mac_only", "mac_and_visor"]
         });
+      }
+      if (request.method === "GET" && url.pathname === "/api/audio-levels") {
+        return json(response, 200, this.bridge.getAudioDiagnostics());
       }
       if (request.method === "PUT" && url.pathname === "/api/settings") {
         const payload = await readJson(request);
-        const requested = isRecord(payload) ? payload.localAudioOutput : undefined;
-        const output = typeof requested === "boolean"
-          ? (requested ? "mac_and_visor" : "visor_only")
-          : requested;
-        if (!isLocalAudioOutput(output)) {
+        const record = isRecord(payload) ? payload : {};
+        const requestedOutput = record.localAudioOutput;
+        const output = typeof requestedOutput === "boolean"
+          ? (requestedOutput ? "mac_and_visor" : "visor_only")
+          : requestedOutput;
+        const requestedInput = record.audioInputSource;
+        if (output !== undefined && !isLocalAudioOutput(output)) {
           return json(response, 400, { error: "localAudioOutput must be visor_only, mac_only, or mac_and_visor" });
         }
-        this.bridge.setLocalAudioOutput(output);
-        return json(response, 200, { ok: true, localAudioOutput: this.bridge.getLocalAudioOutput() });
+        if (requestedInput !== undefined && !isAudioInputSource(requestedInput)) {
+          return json(response, 400, { error: "audioInputSource must be visor or mac" });
+        }
+        if (isLocalAudioOutput(output)) this.bridge.setLocalAudioOutput(output);
+        if (isAudioInputSource(requestedInput)) this.bridge.setAudioInputSource(requestedInput);
+        return json(response, 200, {
+          ok: true,
+          audioInputSource: this.bridge.getAudioInputSource(),
+          localAudioOutput: this.bridge.getLocalAudioOutput()
+        });
+      }
+      if (request.method === "POST" && url.pathname === "/api/audio-test/start") {
+        await this.bridge.startAudioTest();
+        return json(response, 200, { ok: true, ...this.bridge.getAudioDiagnostics() });
+      }
+      if (request.method === "POST" && url.pathname === "/api/audio-test/stop") {
+        await this.bridge.stopAudioTest();
+        return json(response, 200, { ok: true, ...this.bridge.getAudioDiagnostics() });
       }
       return json(response, 405, { error: "method not allowed" });
     }
@@ -183,7 +205,7 @@ function html(response: ServerResponse, body: string): void {
     "Content-Length": payload.byteLength,
     "Cache-Control": "no-store",
     "X-Content-Type-Options": "nosniff",
-    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'"
+    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'"
   });
   response.end(payload);
 }
@@ -218,61 +240,135 @@ const MANAGEMENT_PAGE = String.raw`<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>CodeX Commander Bridge</title>
+  <title>CodeX Commander Bridge 音频诊断</title>
   <style>
-    :root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif; background: #091116; color: #edf7fa; }
-    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: radial-gradient(circle at 20% 10%, #173b48, #091116 55%); }
-    main { width: min(620px, calc(100vw - 40px)); padding: 34px; border: 1px solid #28505b; border-radius: 24px; background: rgba(11, 28, 35, .92); box-shadow: 0 24px 80px rgba(0,0,0,.35); }
-    h1 { margin: 0 0 8px; font-size: 28px; letter-spacing: -.03em; }
-    p { color: #a8c3ca; line-height: 1.6; }
-    .card { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-top: 28px; padding: 22px; border-radius: 18px; background: #102832; }
-    .label { font-size: 18px; font-weight: 700; }
-    .hint { margin-top: 6px; color: #8caab2; font-size: 14px; }
-    input { width: 48px; height: 28px; accent-color: #38d7ff; }
-    #status { margin-top: 20px; color: #70e6b0; min-height: 24px; }
+    :root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif; background: #070d12; color: #eef9fb; }
+    body { margin: 0; min-height: 100vh; background: radial-gradient(circle at 8% 0%, #205466, transparent 40%), radial-gradient(circle at 100% 100%, #243a52, transparent 42%), #070d12; }
+    main { width: min(900px, calc(100vw - 32px)); margin: 0 auto; padding: 34px 0 48px; }
+    h1 { margin: 0 0 8px; font-size: clamp(28px, 5vw, 44px); letter-spacing: -.04em; }
+    p { color: #a9c2ca; line-height: 1.6; }
+    .eyebrow { color: #68e0d0; font-size: 12px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+    .panel { margin-top: 24px; padding: 22px; border: 1px solid #294d59; border-radius: 22px; background: rgba(10, 27, 35, .88); box-shadow: 0 24px 80px rgba(0,0,0,.26); }
+    .routes, .meters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .field, .meter { padding: 18px; border-radius: 16px; background: #102832; }
+    .field label, .meter-title { display: block; margin-bottom: 9px; color: #a9c7ce; font-size: 13px; font-weight: 700; }
+    select, button { width: 100%; border: 1px solid #3c6974; border-radius: 11px; padding: 12px 13px; color: #f4ffff; background: #0b1b22; font: inherit; }
+    button { cursor: pointer; border-color: #54d9c9; color: #052020; background: #63e4d1; font-weight: 800; }
+    button[data-active="true"] { border-color: #ffb86c; color: #291706; background: #ffbf73; }
+    .meter-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .meter-status { color: #6fe3bd; font-size: 12px; }
+    .bar { height: 14px; margin: 16px 0 10px; overflow: hidden; border-radius: 999px; background: #071317; }
+    .fill { width: 0%; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #36c7ff, #67e5c6, #ffd166); transition: width .12s linear; }
+    .values { display: flex; justify-content: space-between; color: #96b4bc; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .action { display: grid; grid-template-columns: minmax(0, 1fr) 220px; align-items: end; gap: 18px; }
+    #status { min-height: 22px; color: #70e6b0; }
+    .hint { color: #8caab2; font-size: 13px; }
     code { color: #79def5; }
+    @media (max-width: 680px) { main { width: min(100% - 24px, 520px); padding-top: 24px; } .routes, .meters, .action { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
   <main>
-    <h1>CodeX Commander Bridge</h1>
-    <p>macOS 本机管理页。选择服务器返回的原生音频播放到眼镜、Mac，或两者同时播放。</p>
-    <section class="card">
-      <div><div class="label">回复音频输出</div><div class="hint">仅电脑模式不会向眼镜发送下行音频</div></div>
-      <select id="localAudio" aria-label="回复音频输出">
-        <option value="visor_only">仅眼镜</option>
-        <option value="mac_only">仅电脑</option>
-        <option value="mac_and_visor">电脑 + 眼镜</option>
-      </select>
+    <div class="eyebrow">CodeX Commander / Bridge</div>
+    <h1>原生 Voice Chat 音频诊断</h1>
+    <p>先选择输入和输出，再启动一次测试。这里走当前 ChatGPT 登录态与 Chromium WebRTC 原生音频，不使用 TTS。</p>
+    <section class="panel routes">
+      <div class="field"><label for="audioInput">输入来源</label><select id="audioInput"><option value="visor">眼镜麦克风</option><option value="mac">电脑麦克风</option></select><div class="hint">电脑测试时选择电脑麦克风，眼镜测试时选择眼镜麦克风。</div></div>
+      <div class="field"><label for="localAudio">服务器回复输出</label><select id="localAudio"><option value="visor_only">仅眼镜</option><option value="mac_only">仅电脑</option><option value="mac_and_visor">电脑 + 眼镜</option></select><div class="hint">电脑输出由 Chromium WebRTC 远端音频直接播放。</div></div>
     </section>
-    <div id="status">正在读取 Bridge 状态…</div>
-    <p class="hint">默认值：<code>visor_only</code>。管理页只允许从本机访问。</p>
+    <section class="panel meters">
+      <div class="meter"><div class="meter-head"><div class="meter-title">输入电平</div><div id="inputStatus" class="meter-status">未采集</div></div><div class="bar"><div id="inputFill" class="fill"></div></div><div class="values"><span id="inputRms">RMS 0.000</span><span id="inputPeak">Peak 0.000</span></div></div>
+      <div class="meter"><div class="meter-head"><div class="meter-title">服务器返回电平</div><div id="outputStatus" class="meter-status">未收到</div></div><div class="bar"><div id="outputFill" class="fill"></div></div><div class="values"><span id="outputRms">RMS 0.000</span><span id="outputPeak">Peak 0.000</span></div></div>
+    </section>
+    <section class="panel action"><div><div id="status">正在读取 Bridge 状态...</div><div class="hint">测试期间请直接对电脑麦克风说话；结束后点击停止，避免持续占用麦克风。</div></div><button id="testButton" type="button">开始音频测试</button></section>
+    <p class="hint">管理页只允许从本机访问。当前设置只作用于运行中的 Bridge，重启后回到环境变量默认值。</p>
   </main>
   <script>
-    const control = document.querySelector('#localAudio');
+    const inputControl = document.querySelector('#audioInput');
+    const outputControl = document.querySelector('#localAudio');
+    const testButton = document.querySelector('#testButton');
     const status = document.querySelector('#status');
-    const labels = { visor_only: '仅眼镜播放已开启', mac_only: '仅电脑播放已开启', mac_and_visor: '电脑 + 眼镜同时播放已开启' };
-    const normalize = (value) => typeof value === 'boolean' ? (value ? 'mac_and_visor' : 'visor_only') : value;
-    const updateStatus = (value) => { control.value = normalize(value); status.textContent = labels[control.value] || '音频输出模式未知'; };
+    const inputFill = document.querySelector('#inputFill');
+    const outputFill = document.querySelector('#outputFill');
+    const inputRms = document.querySelector('#inputRms');
+    const inputPeak = document.querySelector('#inputPeak');
+    const outputRms = document.querySelector('#outputRms');
+    const outputPeak = document.querySelector('#outputPeak');
+    const inputStatus = document.querySelector('#inputStatus');
+    const outputStatus = document.querySelector('#outputStatus');
+    let testActive = false;
+    const outputLabels = { visor_only: '仅眼镜', mac_only: '仅电脑', mac_and_visor: '电脑 + 眼镜' };
+    const inputLabels = { visor: '眼镜麦克风', mac: '电脑麦克风' };
+    const clamp = (value) => Math.max(0, Math.min(1, Number(value) || 0));
+    const meterWidth = (level) => Math.min(100, Math.max(0, Math.round(clamp(level.peak) * 100)));
+    const updateMeters = (value) => {
+      const input = value.input || {};
+      const output = value.output || {};
+      inputFill.style.width = meterWidth(input) + '%';
+      outputFill.style.width = meterWidth(output) + '%';
+      inputRms.textContent = 'RMS ' + clamp(input.rms).toFixed(3);
+      inputPeak.textContent = 'Peak ' + clamp(input.peak).toFixed(3);
+      outputRms.textContent = 'RMS ' + clamp(output.rms).toFixed(3);
+      outputPeak.textContent = 'Peak ' + clamp(output.peak).toFixed(3);
+      inputStatus.textContent = input.active ? '有声音' : (value.testActive ? '等待输入' : '未采集');
+      outputStatus.textContent = output.active ? '已收到返回' : '未收到返回';
+      testActive = value.testActive === true;
+      testButton.dataset.active = String(testActive);
+      testButton.textContent = testActive ? '停止音频测试' : '开始音频测试';
+    };
+    const updateStatus = (value) => {
+      inputControl.value = value.audioInputSource || 'visor';
+      outputControl.value = value.localAudioOutput || 'visor_only';
+      status.textContent = '输入：' + (inputLabels[inputControl.value] || inputControl.value) + '；输出：' + (outputLabels[outputControl.value] || outputControl.value);
+    };
     async function load() {
-      const response = await fetch('/api/settings');
-      const value = await response.json();
-      updateStatus(value.localAudioOutput);
+      const response = await fetch('/api/settings', { cache: 'no-store' });
+      updateStatus(await response.json());
     }
-    control.addEventListener('change', async () => {
-      control.disabled = true;
-      const response = await fetch('/api/settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ localAudioOutput: control.value }) });
+    async function saveSettings() {
+      inputControl.disabled = true;
+      outputControl.disabled = true;
+      const response = await fetch('/api/settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ audioInputSource: inputControl.value, localAudioOutput: outputControl.value }) });
       const value = await response.json();
-      control.disabled = false;
-      updateStatus(value.localAudioOutput);
+      inputControl.disabled = false;
+      outputControl.disabled = false;
+      if (!response.ok) throw new Error(value.error || '设置失败');
+      updateStatus(value);
+    }
+    inputControl.addEventListener('change', () => saveSettings().catch((error) => { status.textContent = error.message; }));
+    outputControl.addEventListener('change', () => saveSettings().catch((error) => { status.textContent = error.message; }));
+    testButton.addEventListener('click', async () => {
+      testButton.disabled = true;
+      const starting = !testActive;
+      try {
+        const path = starting ? '/api/audio-test/start' : '/api/audio-test/stop';
+        const response = await fetch(path, { method: 'POST' });
+        const value = await response.json();
+        if (!response.ok) throw new Error(value.error || '音频测试失败');
+        updateMeters(value);
+        status.textContent = starting ? '音频测试已开始，请说话' : '音频测试已停止';
+      } catch (error) {
+        status.textContent = error.message || String(error);
+      } finally {
+        testButton.disabled = false;
+      }
     });
+    async function poll() {
+      try { updateMeters(await (await fetch('/api/audio-levels', { cache: 'no-store' })).json()); } catch { /* bridge may be restarting */ }
+    }
     load().catch(() => { status.textContent = '无法读取 Bridge 状态'; });
+    poll();
+    setInterval(poll, 160);
   </script>
 </body>
 </html>`;
 
 function isLocalAudioOutput(value: unknown): value is LocalAudioOutput {
   return value === "visor_only" || value === "mac_only" || value === "mac_and_visor";
+}
+
+function isAudioInputSource(value: unknown): value is AudioInputSource {
+  return value === "visor" || value === "mac";
 }
 
 function toBuffer(data: RawData): Buffer {

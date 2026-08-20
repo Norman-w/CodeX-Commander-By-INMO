@@ -4,11 +4,12 @@ import { EventEmitter } from "node:events";
 import { AUDIO_CHANNELS, AUDIO_SAMPLE_RATE } from "@codex-commander/protocol";
 
 import type { CodexNotification } from "../codex/CodexAppServerClient.js";
-import type { LocalAudioOutput } from "../config.js";
+import type { AudioInputSource, LocalAudioOutput } from "../config.js";
 import type { Logger } from "../log.js";
 import { sanitizeForVisor } from "../privacy/VisorText.js";
 import { CaptionLog, type CaptionRole } from "./CaptionLog.js";
 import { ChromiumRealtimeSession } from "./ChromiumRealtimeSession.js";
+import { measurePcm16 } from "./AudioDiagnostics.js";
 import { RealtimeSessionOrchestrator } from "./RealtimeSessionOrchestrator.js";
 import { MIN_INPUT_AUDIO_BYTES, VoiceClientError } from "./types.js";
 //#endregion
@@ -51,6 +52,7 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
   private waitingForReply = false;
   private sessionFailure: string | null = null;
   private replyTimer?: NodeJS.Timeout;
+  private inputHadSignal = false;
   private readonly pending: Buffer[] = [];
   private readonly captions = new CaptionLog();
   private readonly orchestrator: RealtimeSessionOrchestrator;
@@ -61,7 +63,8 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
   constructor(
     private readonly host: CodexRealtimeHost,
     private readonly logger: Logger,
-    localAudioOutput: LocalAudioOutput = "visor_only"
+    localAudioOutput: LocalAudioOutput = "visor_only",
+    audioInputSource: AudioInputSource = "visor"
   ) {
     super();
     this.orchestrator = new RealtimeSessionOrchestrator({
@@ -69,7 +72,7 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
       appendSpeech: (text) => this.speakSummary(text),
       restartSession: () => this.restartSession()
     });
-    this.chromiumSession = new ChromiumRealtimeSession(host, logger, localAudioOutput);
+    this.chromiumSession = new ChromiumRealtimeSession(host, logger, localAudioOutput, audioInputSource);
     this.chromiumSession.on("audio", (pcm: Buffer) => {
       this.onOutputAudio({
         data: pcm.toString("base64"),
@@ -78,6 +81,11 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
         samplesPerChannel: pcm.length / 2
       });
     });
+    this.chromiumSession.on("inputLevel", (level) => {
+      if (level.active) this.inputHadSignal = true;
+      this.emit("inputLevel", level);
+    });
+    this.chromiumSession.on("outputLevel", (level) => this.emit("outputLevel", level));
     this.unsubscribe = host.subscribeNotifications((notification) => this.handleNotification(notification));
   }
 
@@ -87,6 +95,14 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
 
   setLocalAudioOutput(output: LocalAudioOutput): void {
     this.chromiumSession.setLocalAudioOutput(output);
+  }
+
+  setAudioInputSource(source: AudioInputSource): void {
+    this.chromiumSession.setAudioInputSource(source);
+  }
+
+  setInputActive(active: boolean): void {
+    this.chromiumSession.setInputActive(active);
   }
 
   async probeRealtime(): Promise<void> {
@@ -103,11 +119,13 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
     if (this.sessionReset) await this.sessionReset;
     this.inputStarted = true;
     this.inputBytes = 0;
+    this.inputHadSignal = false;
     this.outputAudioFrames = 0;
     this.pending.length = 0;
     this.inputItemId = crypto.randomUUID();
     this.captions.beginUserTurn();
     await this.ensureSession();
+    this.chromiumSession.setInputActive(true);
     for (const chunk of this.pending) this.enqueueAppend(chunk);
     this.pending.length = 0;
   }
@@ -126,8 +144,9 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
   async endInput(): Promise<void> {
     if (!this.inputStarted) throw new VoiceClientError("ptt_not_active", "当前没有正在录音的语音");
     this.inputStarted = false;
+    this.chromiumSession.setInputActive(false);
     await this.appendChain.catch(() => undefined);
-    if (this.inputBytes < MIN_INPUT_AUDIO_BYTES) {
+    if (this.inputBytes < MIN_INPUT_AUDIO_BYTES && !this.inputHadSignal) {
       this.inputItemId = null;
       throw new VoiceClientError("ptt_too_short", "说话时间太短，请再说一次");
     }
@@ -148,8 +167,10 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
 
   abortInput(): void {
     this.inputStarted = false;
+    this.chromiumSession.setInputActive(false);
     this.clearWaitingForReply();
     this.inputBytes = 0;
+    this.inputHadSignal = false;
     this.inputItemId = null;
     this.pending.length = 0;
   }
@@ -279,6 +300,7 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
     if (!chunk) return;
     const pcm = Buffer.from(chunk.data, "base64");
     if (pcm.byteLength === 0) return;
+    this.emit("outputLevel", measurePcm16(pcm));
     if (!hasAudibleSignal(pcm)) return;
     if (chunk.sampleRate !== AUDIO_SAMPLE_RATE) {
       this.logger.warn("Codex realtime sample rate differs from glasses PCM", { sampleRate: chunk.sampleRate });
@@ -326,6 +348,8 @@ export class CodexRealtimeVoiceClient extends EventEmitter {
 
   private failOpenTurn(message: string): void {
     this.inputStarted = false;
+    this.chromiumSession.setInputActive(false);
+    this.inputHadSignal = false;
     this.clearWaitingForReply();
     this.emit("error", new VoiceClientError("realtime_unavailable", message));
   }

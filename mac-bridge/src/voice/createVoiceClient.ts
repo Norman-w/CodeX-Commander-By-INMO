@@ -25,6 +25,6 @@ export function createVoiceClient(
       logger
     );
   }
-  return new CodexRealtimeVoiceClient(codex, logger, config.audio.localOutput);
+  return new CodexRealtimeVoiceClient(codex, logger, config.audio.localOutput, config.audio.inputSource);
 }
 //#endregion

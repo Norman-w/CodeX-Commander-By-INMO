@@ -5,12 +5,13 @@ import type {
 } from "@codex-commander/protocol";
 import { CLIENT_AUDIO_FRAME, decodeBinaryFrame, encodeBinaryFrame, SERVER_AUDIO_FRAME } from "@codex-commander/protocol";
 
-import type { BridgeConfig, LocalAudioOutput } from "../config.js";
+import type { AudioInputSource, BridgeConfig, LocalAudioOutput } from "../config.js";
 import { CodexController } from "../codex/CodexController.js";
 import type { Logger } from "../log.js";
 import { ImageService } from "../media/ImageService.js";
 import { PairingStore, type PairingSnapshot } from "../security/PairingStore.js";
 import { createVoiceClient } from "../voice/createVoiceClient.js";
+import { measurePcm16, type AudioLevel } from "../voice/AudioDiagnostics.js";
 import { VoiceClientError, type CommanderVoice } from "../voice/types.js";
 import { EventJournal, RequestDeduplicator } from "./EventJournal.js";
 
@@ -40,6 +41,12 @@ export class CommanderBridge {
   private audioResponseActive = false;
   private ready = false;
   private localAudioOutput: LocalAudioOutput;
+  private audioInputSource: AudioInputSource;
+  private inputLevel: AudioLevel = { rms: 0, peak: 0, active: false };
+  private outputLevel: AudioLevel = { rms: 0, peak: 0, active: false };
+  private inputLevelAt = 0;
+  private outputLevelAt = 0;
+  private diagnosticInputActive = false;
 
   constructor(
     private readonly config: BridgeConfig,
@@ -47,6 +54,7 @@ export class CommanderBridge {
     private readonly logger: Logger
   ) {
     this.localAudioOutput = config.audio.localOutput;
+    this.audioInputSource = config.audio.inputSource;
     this.pairing = new PairingStore(config.pairingFile);
     this.codex = new CodexController(config, logger);
     this.images = new ImageService(config.mediaRoots, mediaOutputRoot);
@@ -90,6 +98,14 @@ export class CommanderBridge {
       }
       this.broadcastBinary(encodeBinaryFrame(SERVER_AUDIO_FRAME, audio));
     });
+    this.voice.on("inputLevel", (level: AudioLevel) => {
+      this.inputLevel = level;
+      this.inputLevelAt = Date.now();
+    });
+    this.voice.on("outputLevel", (level: AudioLevel) => {
+      this.outputLevel = level;
+      this.outputLevelAt = Date.now();
+    });
     this.voice.on("audioEnd", (transcript: string) => {
       if (!this.audioResponseActive) return;
       this.audioResponseActive = false;
@@ -124,6 +140,7 @@ export class CommanderBridge {
 
   async stop(): Promise<void> {
     this.ready = false;
+    this.diagnosticInputActive = false;
     this.voice.close();
     for (const session of this.sessions.values()) session.transport.close(1001, "bridge stopping");
     this.sessions.clear();
@@ -134,6 +151,24 @@ export class CommanderBridge {
   getPairingSnapshot(): PairingSnapshot { return this.pairing.snapshot(); }
   validateMediaToken(deviceId: string, token: string): boolean { return this.pairing.isTokenValid(deviceId, token); }
   getLocalAudioOutput(): LocalAudioOutput { return this.localAudioOutput; }
+  getAudioInputSource(): AudioInputSource { return this.audioInputSource; }
+  getAudioDiagnostics(): Record<string, unknown> {
+    const now = Date.now();
+    return {
+      audioInputSource: this.audioInputSource,
+      localAudioOutput: this.localAudioOutput,
+      testActive: this.diagnosticInputActive,
+      visorConnected: [...this.sessions.values()].some((session) => session.authenticated),
+      input: now - this.inputLevelAt < 600 ? this.inputLevel : { rms: 0, peak: 0, active: false },
+      output: now - this.outputLevelAt < 600 ? this.outputLevel : { rms: 0, peak: 0, active: false },
+    };
+  }
+  setAudioInputSource(source: AudioInputSource): void {
+    this.audioInputSource = source;
+    this.inputLevelAt = 0;
+    this.voice.setAudioInputSource?.(source);
+    this.logger.info("Audio input source updated", { source });
+  }
   setLocalAudioOutput(output: LocalAudioOutput): void {
     const previous = this.localAudioOutput;
     this.localAudioOutput = output;
@@ -143,6 +178,30 @@ export class CommanderBridge {
       this.broadcast(this.journal.create({ type: "assistant_audio_end" }, false));
     }
     this.logger.info("Audio output mode updated", { output });
+  }
+
+  async startAudioTest(): Promise<void> {
+    if (this.diagnosticInputActive) return;
+    if ([...this.sessions.values()].some((session) => session.pttActive)) {
+      throw new BridgeError("ptt_active", "眼镜正在录音，请先结束眼镜 PTT", true);
+    }
+    if (!this.voice.setAudioInputSource || !this.voice.setInputActive) {
+      throw new BridgeError("audio_test_unavailable", "当前语音客户端不支持可切换音频输入", true);
+    }
+    this.voice.setAudioInputSource(this.audioInputSource);
+    await this.voice.beginInput();
+    this.diagnosticInputActive = true;
+    this.logger.info("Audio diagnostic test started", { input: this.audioInputSource, output: this.localAudioOutput });
+  }
+
+  async stopAudioTest(): Promise<void> {
+    if (!this.diagnosticInputActive) return;
+    try {
+      await this.voice.endInput();
+    } finally {
+      this.diagnosticInputActive = false;
+    }
+    this.logger.info("Audio diagnostic test stopped");
   }
 
   async resetPairing(): Promise<PairingSnapshot> {
@@ -182,6 +241,7 @@ export class CommanderBridge {
         await this.sendStateSync(session);
         break;
       case "ptt_start":
+        if (this.diagnosticInputActive) throw new BridgeError("audio_test_active", "电脑音频测试正在进行", true);
         if (session.pttActive) throw new BridgeError("ptt_already_active", "PTT 已经处于录音状态", true);
         if (this.audioResponseActive) {
           this.audioResponseActive = false;
@@ -243,6 +303,9 @@ export class CommanderBridge {
     if (decoded.payload.byteLength > MAX_AUDIO_FRAME_BYTES) {
       throw new BridgeError("bad_audio_frame", "音频帧超过允许大小", true);
     }
+    if (this.audioInputSource !== "visor") return;
+    this.inputLevel = measurePcm16(decoded.payload);
+    this.inputLevelAt = Date.now();
     this.voice.appendInput(decoded.payload);
   }
 

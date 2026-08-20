@@ -8,6 +8,7 @@ const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(packageRoot, "..");
 
 export type LocalAudioOutput = "visor_only" | "mac_only" | "mac_and_visor";
+export type AudioInputSource = "visor" | "mac";
 
 const EnvSchema = z.object({
   OPENAI_API_KEY: z.string().min(1).optional(),
@@ -22,6 +23,7 @@ const EnvSchema = z.object({
   COMMANDER_REALTIME_MODEL: z.string().min(1).default("gpt-realtime-2.1-mini"),
   COMMANDER_REALTIME_VOICE: z.string().min(1).default("marin"),
   COMMANDER_REALTIME_IDLE_MS: z.coerce.number().int().min(10_000).max(600_000).default(60_000),
+  COMMANDER_AUDIO_INPUT_SOURCE: z.enum(["visor", "mac"]).default("visor"),
   COMMANDER_LOCAL_AUDIO_OUTPUT: z.enum(["visor_only", "mac_only", "mac_and_visor"]).default("visor_only"),
   COMMANDER_CODEX_BIN: z.string().min(1).default("codex"),
   COMMANDER_THREAD_ID: z.string().uuid().or(z.literal("")).default(""),
@@ -70,6 +72,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
       idleMs: parsed.COMMANDER_REALTIME_IDLE_MS
     },
     audio: {
+      inputSource: parsed.COMMANDER_AUDIO_INPUT_SOURCE,
       localOutput: parsed.COMMANDER_LOCAL_AUDIO_OUTPUT
     },
     codex: {

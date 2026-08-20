@@ -8,7 +8,8 @@ import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 
-import type { LocalAudioOutput } from "../config.js";
+import type { AudioInputSource, LocalAudioOutput } from "../config.js";
+import { measurePcm16 } from "./AudioDiagnostics.js";
 
 const AUDIO_SAMPLE_RATE = 24_000;
 const START_TIMEOUT_MS = 45_000;
@@ -23,8 +24,58 @@ const PAGE_SOURCE = String.raw`<!doctype html>
   let inputNode;
   let peerConnection;
   let remoteContext;
-  let inputMonitorGain;
+  let destination;
   let remoteMonitorGain;
+  let localOutputMode = 'visor_only';
+  let inputSource = 'visor';
+  let inputActive = false;
+  let inputRouteGain;
+  let microphoneStream;
+  let microphoneSource;
+  let microphoneRouteGain;
+  let inputMeterAnalyser;
+  let inputMeterVisorGain;
+  let inputMeterMicGain;
+  let inputMeterSinkGain;
+
+  const applyOutputRouting = () => {
+    if (remoteMonitorGain) {
+      remoteMonitorGain.gain.value = localOutputMode === 'mac_only' || localOutputMode === 'mac_and_visor' ? 1 : 0;
+    }
+  };
+
+  const applyInputRouting = () => {
+    if (inputRouteGain) inputRouteGain.gain.value = inputActive && inputSource === 'visor' ? 1 : 0;
+    if (microphoneRouteGain) microphoneRouteGain.gain.value = inputActive && inputSource === 'mac' ? 1 : 0;
+    if (inputMeterVisorGain) inputMeterVisorGain.gain.value = inputSource === 'visor' ? 1 : 0;
+    if (inputMeterMicGain) inputMeterMicGain.gain.value = inputSource === 'mac' ? 1 : 0;
+  };
+
+  const ensureMicrophone = async () => {
+    if (microphoneSource) return;
+    if (!inputContext || !destination || !inputMeterAnalyser) return;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      throw new Error('Chromium does not expose getUserMedia for the Mac microphone');
+    }
+    microphoneStream = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+    });
+    microphoneSource = inputContext.createMediaStreamSource(microphoneStream);
+    microphoneRouteGain = inputContext.createGain();
+    microphoneSource.connect(microphoneRouteGain);
+    microphoneRouteGain.connect(destination);
+    inputMeterMicGain = inputContext.createGain();
+    microphoneSource.connect(inputMeterMicGain);
+    inputMeterMicGain.connect(inputMeterAnalyser);
+    applyInputRouting();
+  };
+
+  const setInputSource = async (value) => {
+    inputSource = value === 'mac' ? 'mac' : 'visor';
+    if (inputSource === 'mac') await ensureMicrophone();
+    applyInputRouting();
+    send({ type: 'input-source', source: inputSource });
+  };
 
   const send = (value) => {
     if (control && control.readyState === WebSocket.OPEN) {
@@ -55,12 +106,18 @@ const PAGE_SOURCE = String.raw`<!doctype html>
           send({ type: 'answer-set' });
         }
         if (message.type === 'local-output') {
-          const mode = typeof message.mode === 'string'
+          localOutputMode = typeof message.mode === 'string'
             ? message.mode
             : (message.enabled === true ? 'mac_and_visor' : 'visor_only');
-          const gain = mode === 'mac_only' || mode === 'mac_and_visor' ? 1 : 0;
-          if (inputMonitorGain) inputMonitorGain.gain.value = 0;
-          if (remoteMonitorGain) remoteMonitorGain.gain.value = gain;
+          applyOutputRouting();
+        }
+        if (message.type === 'input-source') {
+          await setInputSource(message.source);
+        }
+        if (message.type === 'input-active') {
+          inputActive = message.active === true;
+          applyInputRouting();
+          send({ type: 'input-active', active: inputActive });
         }
         if (message.type === 'close') {
           window.close();
@@ -113,13 +170,41 @@ const PAGE_SOURCE = String.raw`<!doctype html>
     URL.revokeObjectURL(workletUrl);
     await inputContext.resume();
 
-    const destination = inputContext.createMediaStreamDestination();
+    destination = inputContext.createMediaStreamDestination();
     inputNode = new AudioWorkletNode(inputContext, 'codex-commander-input', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [1] });
-    inputNode.connect(destination);
-    inputMonitorGain = inputContext.createGain();
-    inputMonitorGain.gain.value = 0;
-    inputNode.connect(inputMonitorGain);
-    inputMonitorGain.connect(inputContext.destination);
+    inputRouteGain = inputContext.createGain();
+    inputNode.connect(inputRouteGain);
+    inputRouteGain.connect(destination);
+    inputMeterAnalyser = inputContext.createAnalyser();
+    inputMeterAnalyser.fftSize = 1024;
+    inputMeterAnalyser.smoothingTimeConstant = 0.18;
+    inputMeterSinkGain = inputContext.createGain();
+    inputMeterSinkGain.gain.value = 0;
+    inputMeterAnalyser.connect(inputMeterSinkGain);
+    inputMeterSinkGain.connect(inputContext.destination);
+    inputMeterVisorGain = inputContext.createGain();
+    inputNode.connect(inputMeterVisorGain);
+    inputMeterVisorGain.connect(inputMeterAnalyser);
+    applyInputRouting();
+    const inputMeterData = new Float32Array(inputMeterAnalyser.fftSize);
+    setInterval(() => {
+      inputMeterAnalyser.getFloatTimeDomainData(inputMeterData);
+      let sumSquares = 0;
+      let peak = 0;
+      for (const sample of inputMeterData) {
+        const magnitude = Math.abs(sample);
+        sumSquares += sample * sample;
+        peak = Math.max(peak, magnitude);
+      }
+      send({
+        type: 'input-level',
+        source: inputSource,
+        active: inputActive && peak > 0.01,
+        rms: Math.sqrt(sumSquares / Math.max(1, inputMeterData.length)),
+        peak,
+      });
+    }, 100);
+    if (inputSource === 'mac') await ensureMicrophone();
 
     peerConnection = new RTCPeerConnection();
     const events = peerConnection.createDataChannel('oai-events');
@@ -154,6 +239,7 @@ const PAGE_SOURCE = String.raw`<!doctype html>
         remoteMonitorGain.gain.value = 0;
         processor.connect(remoteMonitorGain);
         remoteMonitorGain.connect(remoteContext.destination);
+        applyOutputRouting();
         send({ type: 'remote-sample-rate', sampleRate: remoteContext.sampleRate });
         send({ type: 'remote-track' });
       } catch (error) {
@@ -202,14 +288,18 @@ export class ChromiumRealtimeSession extends EventEmitter {
   private rejectStart?: (error: Error) => void;
   private remoteAudioFrames = 0;
   private remoteAudioBytes = 0;
+  private inputSource: AudioInputSource;
+  private inputActive = false;
 
   public constructor(
     private readonly host: ChromiumRealtimeHost,
     private readonly logger: any,
-    localAudioOutput: LocalAudioOutput = "visor_only"
+    localAudioOutput: LocalAudioOutput = "visor_only",
+    inputSource: AudioInputSource = "visor"
   ) {
     super();
     this.localAudioOutput = localAudioOutput;
+    this.inputSource = inputSource;
   }
 
   private localAudioOutput: LocalAudioOutput = "visor_only";
@@ -220,6 +310,7 @@ export class ChromiumRealtimeSession extends EventEmitter {
     this.remoteSampleRate = 48_000;
     this.remoteAudioFrames = 0;
     this.remoteAudioBytes = 0;
+    this.inputActive = false;
     this.offerRequested = false;
     this.connected = false;
 
@@ -256,6 +347,16 @@ export class ChromiumRealtimeSession extends EventEmitter {
   public setLocalAudioOutput(output: LocalAudioOutput): void {
     this.localAudioOutput = output;
     this.sendJson({ type: 'local-output', mode: output });
+  }
+
+  public setAudioInputSource(source: AudioInputSource): void {
+    this.inputSource = source;
+    this.sendJson({ type: 'input-source', source });
+  }
+
+  public setInputActive(active: boolean): void {
+    this.inputActive = active;
+    this.sendJson({ type: 'input-active', active });
   }
 
   public handleNotification(notification: unknown): void {
@@ -350,6 +451,7 @@ export class ChromiumRealtimeSession extends EventEmitter {
       '--no-default-browser-check',
       '--no-sandbox',
       '--autoplay-policy=no-user-gesture-required',
+      '--use-fake-ui-for-media-stream',
       `--user-data-dir=${profileDir}`,
       `http://127.0.0.1:${address.port}/`,
     ];
@@ -385,6 +487,8 @@ export class ChromiumRealtimeSession extends EventEmitter {
       this.sendJson({ type: 'answer', sdp });
     }
     this.sendJson({ type: 'local-output', mode: this.localAudioOutput });
+    this.sendJson({ type: 'input-source', source: this.inputSource });
+    this.sendJson({ type: 'input-active', active: this.inputActive });
   }
 
   private onPageMessage(text: string): void {
@@ -407,6 +511,14 @@ export class ChromiumRealtimeSession extends EventEmitter {
     }
     if (type === 'remote-track') {
       this.logger?.info?.('Chromium realtime remote audio track received');
+      return;
+    }
+    if (type === 'input-level') {
+      this.emit('inputLevel', {
+        rms: clampLevel(message.rms),
+        peak: clampLevel(message.peak),
+        active: message.active === true,
+      });
       return;
     }
     if (type === 'state' && message.state === 'connected') {
@@ -463,6 +575,7 @@ export class ChromiumRealtimeSession extends EventEmitter {
     if (sampleCount <= 0) return;
     this.remoteAudioFrames += 1;
     this.remoteAudioBytes += audio.byteLength;
+    this.emit('outputLevel', measurePcm16(audio.subarray(0, sampleCount * 2)));
     if (this.remoteAudioFrames <= 3) {
       this.logger?.info?.('Chromium realtime remote audio frame received', {
         bytes: audio.byteLength,
@@ -531,4 +644,8 @@ function findSdp(value: unknown, depth = 0): string | undefined {
 
 function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
+}
+
+function clampLevel(value: unknown): number {
+  return Math.max(0, Math.min(1, typeof value === 'number' && Number.isFinite(value) ? value : 0));
 }
