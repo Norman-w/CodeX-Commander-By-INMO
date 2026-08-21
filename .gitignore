@@ -10,10 +10,6 @@
 .env.*
 !.env.sample
 
-node_modules/
-dist/
-coverage/
-
 .gradle/
 build/
 **/build/
@@ -37,8 +33,9 @@ bugreport*.zip
 perfetto*.trace
 adb-*.txt
 
+mac-bridge-go/data/
+mac-bridge-go/media/
+mac-bridge-go/bridge
+mac-bridge-go/commanderctl
 mac-bridge/data/
-mac-bridge/media/
-mac-bridge/src/generated/codex/
-mac-bridge/src/generated/codex.tmp-*/
 power-results/

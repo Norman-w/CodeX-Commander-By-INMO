@@ -3,13 +3,15 @@ set -eu
 umask 077
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-data_dir="$project_root/mac-bridge/data"
+data_dir="$project_root/mac-bridge-go/data"
 env_file="$project_root/.env"
 label="com.codexcommander.inmo.bridge"
 launch_agents_dir="$HOME/Library/LaunchAgents"
 plist="$launch_agents_dir/$label.plist"
 stdout_log="$data_dir/bridge.stdout.log"
 stderr_log="$data_dir/bridge.stderr.log"
+bridge_binary="$project_root/mac-bridge-go/bridge"
+control_binary="$project_root/mac-bridge-go/commanderctl"
 
 [ -f "$env_file" ] || { echo "缺少 .env" >&2; exit 1; }
 set -a
@@ -17,14 +19,15 @@ set -a
 . "$env_file"
 set +a
 
-[ -f "$project_root/mac-bridge/dist/index.js" ] || { echo "Bridge 尚未构建，请先运行 pnpm build" >&2; exit 1; }
+command -v go >/dev/null 2>&1 || { echo "找不到 Go 工具链" >&2; exit 1; }
+go -C "$project_root/mac-bridge-go" build -o "$bridge_binary" ./cmd/bridge
+go -C "$project_root/mac-bridge-go" build -o "$control_binary" ./cmd/commanderctl
+chmod 700 "$bridge_binary" "$control_binary"
 
-node_bin=$(command -v node)
-[ -n "$node_bin" ] && [ -x "$node_bin" ] || { echo "找不到 Node.js" >&2; exit 1; }
 codex_bin=${COMMANDER_CODEX_BIN:-codex}
 if command -v "$codex_bin" >/dev/null 2>&1; then codex_bin=$(command -v "$codex_bin"); fi
 [ -x "$codex_bin" ] || { echo "COMMANDER_CODEX_BIN 不是可执行文件" >&2; exit 1; }
-runtime_path="$(dirname -- "$node_bin"):$(dirname -- "$codex_bin"):/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+runtime_path="$(dirname -- "$bridge_binary"):$(dirname -- "$codex_bin"):/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 mkdir -p "$data_dir" "$launch_agents_dir"
 chmod 700 "$data_dir"
@@ -34,32 +37,14 @@ chmod 600 "$stdout_log" "$stderr_log"
 temporary_plist=$(mktemp "${TMPDIR:-/tmp}/codex-commander-launch-agent.XXXXXX")
 trap 'rm -f "$temporary_plist"' EXIT HUP INT TERM
 
-node - "$temporary_plist" "$label" "$project_root" "$node_bin" "$stdout_log" "$stderr_log" "$runtime_path" <<'NODE'
-import { writeFileSync } from "node:fs";
-
-const [, , output, label, root, node, stdoutLog, stderrLog, pathValue] = process.argv;
-const escapeXml = (value) => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
-const string = (value) => `<string>${escapeXml(value)}</string>`;
-const plist = `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>Label</key>${string(label)}
-  <key>ProgramArguments</key><array>
-    ${string(`${root}/scripts/with-local-env.sh`)}
-    ${string(node)}
-    ${string(`${root}/mac-bridge/dist/index.js`)}
-  </array>
-  <key>WorkingDirectory</key>${string(`${root}/mac-bridge`)}
-  <key>EnvironmentVariables</key><dict><key>PATH</key>${string(pathValue)}</dict>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
-  <key>ThrottleInterval</key><integer>5</integer>
-  <key>StandardOutPath</key>${string(stdoutLog)}
-  <key>StandardErrorPath</key>${string(stderrLog)}
-</dict></plist>
-`;
-writeFileSync(output, plist, { mode: 0o600 });
-NODE
+"$control_binary" launch-agent \
+  --output "$temporary_plist" \
+  --label "$label" \
+  --root "$project_root" \
+  --binary "$bridge_binary" \
+  --stdout "$stdout_log" \
+  --stderr "$stderr_log" \
+  --path "$runtime_path"
 
 plutil -lint "$temporary_plist" >/dev/null
 cp "$temporary_plist" "$plist"
@@ -67,9 +52,18 @@ chmod 600 "$plist"
 
 service_target="gui/$(id -u)/$label"
 if launchctl print "$service_target" >/dev/null 2>&1; then
-  launchctl bootout "$service_target"
+	launchctl bootout "$service_target" || true
 fi
-launchctl bootstrap "gui/$(id -u)" "$plist"
+bootstrap_attempt=0
+while ! launchctl bootstrap "gui/$(id -u)" "$plist"; do
+	bootstrap_attempt=$((bootstrap_attempt + 1))
+	if [ "$bootstrap_attempt" -ge 5 ]; then
+		echo "无法加载 Mac Bridge LaunchAgent：$label" >&2
+		exit 1
+	fi
+	launchctl bootout "$service_target" >/dev/null 2>&1 || true
+	sleep 1
+done
 launchctl kickstart -k "$service_target"
 
 attempt=0

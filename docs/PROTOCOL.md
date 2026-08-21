@@ -4,11 +4,11 @@
 
 权威定义：
 
-- TypeScript/Zod：`protocol/src/index.ts`
-- 生成 JSON Schema：`protocol/schema/visor.v1.schema.json`
+- Go 运行时协议：`mac-bridge-go/internal/protocol/protocol.go`
+- 跨语言 JSON Schema：`protocol/schema/visor.v1.schema.json`
 - Kotlin 线协议：`glasses-app/app/src/main/java/com/codexcommander/inmo/protocol/CommanderProtocol.kt`
 
-Zod 是运行时验证的最终权威；生成的 Draft-07 JSON Schema 供跨语言工具/审阅使用，并明确编码 hello 的 token/pairingCode 二选一约束。
+Go 是 Mac 边界验证的最终权威；Draft-07 JSON Schema 供跨语言工具/审阅使用，并明确编码 hello 的 token/pairingCode 二选一约束。
 
 ## 二进制音频
 
@@ -33,7 +33,7 @@ Zod 是运行时验证的最终权威；生成的 Draft-07 JSON Schema 供跨语
 
 - `approval_decision.physicalConfirmation` 必须为 JSON `true`。
 - 审批卡 `kind` 支持 `command`、`file_change` 与 `permissions`；额外权限批准只回传原请求的受限子集，Bridge 固定使用 turn 级作用域。
-- 语音由 Codex app-server 的 `thread/realtime/*`（websocket transport）处理，保留 thread 上下文；不直连 OpenAI Realtime API。
+- 语音由 Codex app-server 的 `thread/realtime/*` 处理，保留 thread 上下文；不直连 OpenAI Realtime API。`COMMANDER_REALTIME_TRANSPORT=auto` 在 `gui_shared` 选择 Go/Pion WebRTC，在 `stdio` 选择 WebSocket + PCM `appendAudio`；也可显式设置 `webrtc` 或 `websocket`。
 - Core realtime 会话中没有审批工具；审批仍走 visor 审批卡。
 - 图片 URL 只能是 `/media/<24位hex>.webp`，下载还需设备 token。
-- Zod 在 Mac 边界校验每个控制消息，Kotlin 忽略未来字段以便向前兼容。
+- Go 在 Mac 边界校验每个控制消息，Kotlin 忽略未来字段以便向前兼容。

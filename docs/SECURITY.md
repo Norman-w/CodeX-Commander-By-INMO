@@ -20,7 +20,7 @@
 ## Codex 权限
 
 - App Server 通过子进程 stdio JSONL 通信，绝不直接暴露网络 WebSocket。
-- 当 `.env` 指定当前桌面任务时，Bridge 使用 App Server `thread/fork` 创建持久的 Commander 专用分支；不会与桌面客户端同时写同一任务。
+- Bridge 启动时不会根据 `.env` 中的 `COMMANDER_THREAD_ID` 自动恢复、创建或 fork Codex 会话；只有用户明确选择/新建会话或发起任务时才会操作目标会话。
 - 默认 sandbox 为 `workspace-write`，写根只包含 `COMMANDER_CWD`；默认审批策略为 `on-request`。
 - 命令、文件修改和额外权限审批显示实体卡，默认拒绝，60 秒到期自动取消。
 - 额外权限批准只回传 Codex 原始请求中的权限对象，并固定为当前 turn；不提供 session 级授权选项。

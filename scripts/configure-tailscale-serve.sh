@@ -29,11 +29,6 @@ else
   exit 1
 fi
 
-dns_name=$($tailscale_bin status --json | node -e '
-let raw=""; process.stdin.on("data", c => raw += c); process.stdin.on("end", () => {
-  const value = JSON.parse(raw).Self?.DNSName?.replace(/\.$/, "");
-  if (!value) process.exit(1);
-  process.stdout.write(value);
-});')
+dns_name=$($tailscale_bin status --json | go -C "$project_root/mac-bridge-go" run ./cmd/commanderctl tailscale-dns)
 
 printf 'wss://%s/v1/visor\n' "$dns_name"

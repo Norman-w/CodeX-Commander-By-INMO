@@ -12,32 +12,9 @@ printf '%s' "$thread_id" | grep -Eq '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{
   exit 1
 }
 
-node - "$env_file" "$thread_id" <<'NODE'
-import { randomUUID } from "node:crypto";
-import { readFileSync, renameSync, writeFileSync } from "node:fs";
-
-const [, , file, threadId] = process.argv;
-const lines = readFileSync(file, "utf8").split(/\r?\n/);
-const bindingId = randomUUID();
-let foundThread = false;
-let foundBinding = false;
-const next = lines.map((line) => {
-  if (line.startsWith("COMMANDER_THREAD_ID=")) {
-    foundThread = true;
-    return `COMMANDER_THREAD_ID=${threadId}`;
-  }
-  if (line.startsWith("COMMANDER_CONTEXT_BINDING_ID=")) {
-    foundBinding = true;
-    return `COMMANDER_CONTEXT_BINDING_ID=${bindingId}`;
-  }
-  return line;
-});
-if (!foundThread) next.push(`COMMANDER_THREAD_ID=${threadId}`);
-if (!foundBinding) next.push(`COMMANDER_CONTEXT_BINDING_ID=${bindingId}`);
-const temporary = `${file}.bind-${process.pid}`;
-writeFileSync(temporary, `${next.join("\n").replace(/\n+$/, "")}\n`, { mode: 0o600 });
-renameSync(temporary, file);
-NODE
+go -C "$project_root/mac-bridge-go" run ./cmd/commanderctl bind-current-codex \
+  --env "$env_file" \
+  --thread-id "$thread_id"
 
 chmod 600 "$env_file"
 echo "已设置当前 Codex 任务为上下文来源（ID 未显示）；Bridge 会创建眼镜专用分支，避免与桌面端争用写锁"

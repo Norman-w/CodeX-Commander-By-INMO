@@ -17,7 +17,7 @@ if [ -f "$env_file" ]; then
   env_mode=$(stat -f '%Lp' "$env_file" 2>/dev/null || stat -c '%a' "$env_file" 2>/dev/null || printf 'unknown')
   case $env_mode in
     600|400) ok ".env 权限仅限当前用户" ;;
-    *) fail ".env 权限为 $env_mode；请运行 chmod 600 .env" ;;
+    *) fail ".env 权限为 ${env_mode}；请运行 chmod 600 .env" ;;
   esac
   set -a
   # shellcheck disable=SC1090
@@ -27,14 +27,12 @@ else
   fail "缺少 .env：先运行 cp .env.sample .env 并填写本机配置"
 fi
 
-if command -v node >/dev/null 2>&1; then
-  node_major=$(node -p 'Number(process.versions.node.split(".")[0])' 2>/dev/null || printf '0')
-  if [ "$node_major" -ge 20 ]; then ok "Node.js 20+ 可用"; else fail "需要 Node.js 20+"; fi
+if command -v go >/dev/null 2>&1; then
+  go_version=$(go version 2>/dev/null || true)
+  if [ -n "$go_version" ]; then ok "Go 工具链可用（${go_version}）"; else fail "Go 工具链不可用"; fi
 else
-  fail "找不到 Node.js 20+"
+  fail "找不到 Go 工具链"
 fi
-
-if command -v pnpm >/dev/null 2>&1; then ok "pnpm 可用"; else fail "找不到 pnpm 9"; fi
 
 java_bin=""
 if [ -n "${JAVA_HOME:-}" ] && [ -x "${JAVA_HOME}/bin/java" ]; then
@@ -87,33 +85,18 @@ case ${COMMANDER_THREAD_ID:-} in
   *) fail "COMMANDER_THREAD_ID 格式无效；可留空或运行 scripts/bind-current-codex.sh" ;;
 esac
 
-case ${OPENAI_API_KEY:-} in
-  ''|your_openai_api_key|sk-your-key-here) ok "未配置 OPENAI_API_KEY（Core realtime 不需要）" ;;
-  *) ok "OPENAI_API_KEY 已配置（仅 COMMANDER_VOICE=openai 时需要）" ;;
-esac
-
 case ${COMMANDER_APP_SERVER_MODE:-gui_shared} in
   gui_shared) ok "app-server 模式：gui_shared（附着 ChatGPT）" ;;
   stdio) ok "app-server 模式：stdio（独立 spawn）" ;;
   *) fail "COMMANDER_APP_SERVER_MODE 无效；使用 gui_shared 或 stdio" ;;
 esac
 
-case ${COMMANDER_VOICE:-codex-realtime} in
-  codex-realtime|auto|codex) ok "语音模式：Core realtime（thread/realtime）" ;;
-  openai) fail "COMMANDER_VOICE=openai 已弃用；请改用 codex-realtime" ;;
-  *) fail "COMMANDER_VOICE 无效；推荐 codex-realtime" ;;
-esac
-
 if [ -x "$codex_bin" ] || [ -f "/Applications/ChatGPT.app/Contents/Resources/codex" ]; then
-  if pnpm --filter @codex-commander/mac-bridge build >/dev/null 2>&1; then
-    attach_json=$(node "$project_root/mac-bridge/scripts/probe-app-server-attach.mjs" 2>/dev/null || true)
-    if printf '%s' "$attach_json" | grep -q '"attachReady": true'; then
-      ok "GUI app-server control socket 可用"
-    else
-      printf '  [提示] GUI app-server socket 不可用；请打开 ChatGPT.app 或设 COMMANDER_APP_SERVER_MODE=stdio\n'
-    fi
+  app_server_socket=${COMMANDER_APP_SERVER_SOCKET:-$HOME/.codex/app-server-control/app-server-control.sock}
+  if [ -S "$app_server_socket" ]; then
+    ok "GUI app-server Unix WebSocket 可用"
   else
-    printf '  [提示] mac-bridge 尚未构建，跳过 app-server 附着探测\n'
+    printf '  [提示] GUI app-server socket 不可用；请打开 ChatGPT.app 或设 COMMANDER_APP_SERVER_MODE=stdio\n'
   fi
 else
   printf '  [提示] 跳过 app-server 附着探测（Codex 不可用）\n'

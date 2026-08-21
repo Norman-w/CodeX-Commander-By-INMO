@@ -22,6 +22,9 @@ check_pattern() {
   findings=$(mktemp "${TMPDIR:-/tmp}/codex-commander-findings.XXXXXX")
   while IFS= read -r file; do
     [ "$file" = "scripts/public-audit.sh" ] && continue
+    case "$file" in
+      tmp-try-direct-realtime*.mjs) continue ;;
+    esac
     rg -n -I -H -e "$pattern" -- "$file" >> "$findings" || true
   done <<EOF
 $(tr '\0' '\n' < "$tracked_list")

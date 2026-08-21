@@ -15,12 +15,11 @@ echo "[1/8] 最终公开内容审计"
 echo "[2/8] 检查本机、私网与 AIR3"
 "$project_root/scripts/doctor.sh" --require-device
 
-echo "[3/8] 安装锁定依赖"
-pnpm install --frozen-lockfile
+echo "[3/8] 构建纯 Go Bridge"
+go -C "$project_root/mac-bridge-go" build -o "$project_root/mac-bridge-go/bridge" ./cmd/bridge
 
-echo "[4/8] 运行协议、Bridge 与 Android 自动验证"
+echo "[4/8] 运行 Go Bridge 与 Android 自动验证"
 "$project_root/scripts/dev-check.sh"
-pnpm --filter @codex-commander/mac-bridge smoke:codex
 
 echo "[5/8] 启动可自动恢复的 Mac Bridge"
 "$project_root/scripts/install-mac-bridge-service.sh"
@@ -33,18 +32,11 @@ echo "[7/8] 安装 AIR3 应用并签发本次配对"
 pairing_code=$("$project_root/scripts/reset-pairing.sh" --code-only)
 
 echo "[8/8] 安全写入配置并验证眼镜连接"
-pairing_log="$project_root/mac-bridge/data/bridge.stdout.log"
-started_at=$(node -e 'process.stdout.write(String(Date.now()))')
 "$project_root/scripts/provision-air3.sh" "$wss_endpoint" "$pairing_code"
 
 attempt=0
 while [ "$attempt" -lt 30 ]; do
-  if tail -300 "$pairing_log" 2>/dev/null | node -e '
-let raw=""; process.stdin.on("data", c => raw += c); process.stdin.on("end", () => {
-  const cutoff=Number(process.argv[1]);
-  const found=raw.split(/\n/).some(line => { try { const r=JSON.parse(line); return r.message==="AIR3 authenticated" && Date.parse(r.time)>=cutoff; } catch { return false; } });
-  process.exit(found ? 0 : 1);
-});' "$started_at"; then
+  if curl --silent --fail "http://127.0.0.1:${COMMANDER_PORT:-8787}/api/audio-levels" | grep -q '"visorConnected":true'; then
     printf '\n安装完成：AIR3 已连接 Mac Bridge，并已继承配置的 Codex 上下文。\n'
     printf '麦克风只会在你按住眼镜腿或主动轻触开始时开启。\n'
     exit 0
