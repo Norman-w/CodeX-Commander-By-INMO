@@ -19,10 +19,11 @@ import (
 )
 
 const (
-	webrtcCodecClockRate = 8_000
-	webrtcFrameSamples   = 160 // 20 ms of PCMU at 8 kHz.
-	webrtcMaxQueue       = webrtcCodecClockRate * 5
-	webrtcStartTimeout   = 30 * time.Second
+	webrtcCodecClockRate      = 8_000
+	webrtcFrameSamples        = 160 // 20 ms of PCMU at 8 kHz.
+	webrtcMaxQueue            = webrtcCodecClockRate * 5
+	webrtcStartTimeout        = 30 * time.Second
+	webrtcSessionReadyTimeout = 15 * time.Second
 )
 
 // webRTCEvents is deliberately smaller than voice.Events. The transport owns
@@ -45,42 +46,45 @@ type webRTCSession struct {
 	logger *log.Logger
 	events webRTCEvents
 
-	mu             sync.Mutex
-	threadID       string
-	peer           *webrtc.PeerConnection
-	track          *webrtc.TrackLocalStaticRTP
-	data           *webrtc.DataChannel
-	inputActive    bool
-	inputQueue     []int16
-	drained        chan struct{}
-	stop           chan struct{}
-	done           chan struct{}
-	ready          chan struct{}
-	readyOnce      sync.Once
-	startError     chan error
-	startErrorOnce sync.Once
-	remoteSet      bool
-	closed         bool
-	sequence       uint16
-	timestamp      uint32
-	ssrc           uint32
-	unsubscribe    func()
+	mu                 sync.Mutex
+	threadID           string
+	peer               *webrtc.PeerConnection
+	track              *webrtc.TrackLocalStaticRTP
+	data               *webrtc.DataChannel
+	inputActive        bool
+	inputQueue         []int16
+	drained            chan struct{}
+	stop               chan struct{}
+	done               chan struct{}
+	ready              chan struct{}
+	readyOnce          sync.Once
+	sessionStarted     chan struct{}
+	sessionStartedOnce sync.Once
+	startError         chan error
+	startErrorOnce     sync.Once
+	remoteSet          bool
+	closed             bool
+	sequence           uint16
+	timestamp          uint32
+	ssrc               uint32
+	unsubscribe        func()
 }
 
 func newWebRTCSession(host Host, c config.Config, logger *log.Logger, events webRTCEvents) *webRTCSession {
 	drained := make(chan struct{})
 	close(drained)
 	return &webRTCSession{
-		host:       host,
-		config:     c,
-		logger:     logger,
-		events:     events,
-		drained:    drained,
-		stop:       make(chan struct{}),
-		done:       make(chan struct{}),
-		ready:      make(chan struct{}),
-		startError: make(chan error, 1),
-		ssrc:       0x434f4445,
+		host:           host,
+		config:         c,
+		logger:         logger,
+		events:         events,
+		drained:        drained,
+		stop:           make(chan struct{}),
+		done:           make(chan struct{}),
+		ready:          make(chan struct{}),
+		sessionStarted: make(chan struct{}),
+		startError:     make(chan error, 1),
+		ssrc:           0x434f4445,
 	}
 }
 
@@ -90,15 +94,8 @@ func newWebRTCSession(host Host, c config.Config, logger *log.Logger, events web
 func (s *webRTCSession) Start(ctx context.Context, threadID string) error {
 	s.threadID = threadID
 	mediaEngine := &webrtc.MediaEngine{}
-	if err := mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
-		RTPCodecCapability: webrtc.RTPCodecCapability{
-			MimeType:  webrtc.MimeTypePCMU,
-			ClockRate: webrtcCodecClockRate,
-			Channels:  1,
-		},
-		PayloadType: 0,
-	}, webrtc.RTPCodecTypeAudio); err != nil {
-		return fmt.Errorf("register PCMU codec: %w", err)
+	if err := mediaEngine.RegisterDefaultCodecs(); err != nil {
+		return fmt.Errorf("register WebRTC audio codecs: %w", err)
 	}
 	api := webrtc.NewAPI(webrtc.WithMediaEngine(mediaEngine))
 	peer, err := api.NewPeerConnection(webrtc.Configuration{})
@@ -122,6 +119,19 @@ func (s *webRTCSession) Start(ctx context.Context, threadID string) error {
 		_ = peer.Close()
 		return fmt.Errorf("attach Go WebRTC audio track: %w", err)
 	}
+	transceivers := peer.GetTransceivers()
+	if len(transceivers) != 1 {
+		_ = peer.Close()
+		return fmt.Errorf("expected one Go WebRTC audio transceiver, got %d", len(transceivers))
+	}
+	// Advertise the same standard audio family as a browser, but prefer PCMU
+	// because the pure-Go input track below is PCMU. This keeps the offer broad
+	// enough for AVAS while avoiding a negotiated Opus sender that we cannot
+	// encode without reintroducing a native codec runtime.
+	if err := transceivers[0].SetCodecPreferences(webRTCAudioCodecPreferences()); err != nil {
+		_ = peer.Close()
+		return fmt.Errorf("set Go WebRTC audio codec preferences: %w", err)
+	}
 	data, err := peer.CreateDataChannel("oai-events", nil)
 	if err != nil {
 		_ = peer.Close()
@@ -138,13 +148,18 @@ func (s *webRTCSession) Start(ctx context.Context, threadID string) error {
 	data.OnMessage(func(message webrtc.DataChannelMessage) {
 		s.handleDataChannel(message.Data)
 	})
-	peer.OnTrack(func(remote *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
+	peer.OnTrack(func(remote *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+		go s.drainRemoteRTCP(receiver)
 		go s.readRemoteTrack(remote)
 	})
 	peer.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+		s.logger.Info("Go WebRTC connection state", map[string]any{"state": state.String()})
 		if state == webrtc.PeerConnectionStateFailed || state == webrtc.PeerConnectionStateClosed {
 			s.signalStartError(fmt.Errorf("Go WebRTC connection %s", strings.ToLower(state.String())))
 		}
+	})
+	peer.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
+		s.logger.Info("Go WebRTC ICE state", map[string]any{"state": state.String()})
 	})
 
 	s.unsubscribe = s.host.SubscribeNotifications(func(notification appserver.Notification) {
@@ -207,7 +222,18 @@ func (s *webRTCSession) Start(ctx context.Context, threadID string) error {
 	select {
 	case <-s.ready:
 		go s.writeRTP()
-		return nil
+		select {
+		case <-s.sessionStarted:
+			return nil
+		case err := <-s.startError:
+			return s.failStart(err)
+		case <-s.done:
+			return s.failStart(errors.New("Go WebRTC session closed before realtime startup completed"))
+		case <-ctx.Done():
+			return s.failStart(ctx.Err())
+		case <-time.After(webrtcSessionReadyTimeout):
+			return s.failStart(errors.New("Codex realtime session did not become ready in time"))
+		}
 	case err := <-s.startError:
 		return s.failStart(err)
 	case <-ctx.Done():
@@ -428,6 +454,7 @@ func (s *webRTCSession) readRemoteTrack(track *webrtc.TrackRemote) {
 	})
 	packets := 0
 	audiblePackets := 0
+	maxPeak := float64(0)
 	for {
 		packet, _, err := track.ReadRTP()
 		if err != nil {
@@ -446,20 +473,55 @@ func (s *webRTCSession) readRemoteTrack(track *webrtc.TrackRemote) {
 		}
 		pcm24 := upsample8To24(pcm8)
 		level := measure(pcm24)
+		if level.Peak > maxPeak {
+			maxPeak = level.Peak
+		}
 		if packets <= 3 {
 			s.logger.Info("Go WebRTC remote audio packet", map[string]any{"codec": codec, "bytes": len(packet.Payload), "peak": level.Peak, "active": level.Active})
 		}
-		if hasAudiblePCM(pcm24) {
+		audible := hasAudiblePCM(pcm24)
+		if audible {
 			audiblePackets++
 			if audiblePackets <= 3 {
 				s.logger.Info("Go WebRTC audible remote audio packet", map[string]any{"codec": codec, "bytes": len(packet.Payload), "peak": level.Peak, "packet": packets})
 			}
 		}
+		if packets%250 == 0 {
+			s.logger.Debug("Go WebRTC remote audio progress", map[string]any{
+				"codec":          codec,
+				"packets":        packets,
+				"audiblePackets": audiblePackets,
+				"peak":           level.Peak,
+				"maxPeak":        maxPeak,
+			})
+		}
 		if s.events.OutputLevel != nil {
 			s.events.OutputLevel(level)
 		}
-		if hasAudiblePCM(pcm24) && s.events.Audio != nil {
+		if audible && s.events.Audio != nil {
 			s.events.Audio(pcm24)
+		}
+	}
+}
+
+// Pion exposes incoming RTCP through RTPReceiver.ReadRTCP. Keeping this
+// drained is important for a long-lived receive track: the remote sender
+// expects receiver feedback and its media output can otherwise degrade into
+// silence even though RTP packets and captions still arrive.
+func (s *webRTCSession) drainRemoteRTCP(receiver *webrtc.RTPReceiver) {
+	if receiver == nil {
+		return
+	}
+	for {
+		packets, _, err := receiver.ReadRTCP()
+		if err != nil {
+			if !s.isClosed() {
+				s.logger.Debug("Go WebRTC remote RTCP ended", map[string]any{"error": err.Error()})
+			}
+			return
+		}
+		if len(packets) > 0 {
+			s.logger.Debug("Go WebRTC remote RTCP received", map[string]any{"packets": len(packets)})
 		}
 	}
 }
@@ -476,7 +538,34 @@ func (s *webRTCSession) handleDataChannel(data []byte) {
 		return
 	}
 	typ := stringValue(event["type"])
+	if typ == "session.started" {
+		s.sessionStartedOnce.Do(func() { close(s.sessionStarted) })
+	}
 	switch typ {
+	case "session.started", "session.updated", "response.created", "response.done", "turn.done", "error":
+		s.logger.Info("Go WebRTC data-channel event", map[string]any{"type": typ})
+	}
+	switch typ {
+	case "input_transcript.added", "output_transcript.added":
+		role := "assistant"
+		if typ == "input_transcript.added" {
+			role = "user"
+		}
+		if item, ok := event["item"].(map[string]any); ok {
+			if text := stringValue(item["text"]); text != "" && s.events.Caption != nil {
+				s.events.Caption(role, text, false)
+			}
+		}
+	case "turn.done":
+		if turn, ok := event["turn"].(map[string]any); ok {
+			role := stringValue(turn["role"])
+			if role != "user" {
+				role = "assistant"
+			}
+			if text := stringValue(turn["transcript"]); text != "" && s.events.Caption != nil {
+				s.events.Caption(role, text, true)
+			}
+		}
 	case "response.audio_transcript.delta", "response.output_audio_transcript.delta", "conversation.item.input_audio_transcription.delta":
 		role := "assistant"
 		if strings.Contains(typ, "input_audio") {
@@ -552,6 +641,43 @@ func sdpAudioCodecs(sdp string) []string {
 		}
 	}
 	return codecs
+}
+
+func webRTCAudioCodecPreferences() []webrtc.RTPCodecParameters {
+	return []webrtc.RTPCodecParameters{
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{
+				MimeType:  webrtc.MimeTypePCMU,
+				ClockRate: webrtcCodecClockRate,
+				Channels:  0,
+			},
+			PayloadType: 0,
+		},
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{
+				MimeType:    webrtc.MimeTypeOpus,
+				ClockRate:   48_000,
+				Channels:    2,
+				SDPFmtpLine: "minptime=10;useinbandfec=1",
+			},
+			PayloadType: 111,
+		},
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{
+				MimeType:  webrtc.MimeTypeG722,
+				ClockRate: webrtcCodecClockRate,
+			},
+			PayloadType: 9,
+		},
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{
+				MimeType:  webrtc.MimeTypePCMA,
+				ClockRate: webrtcCodecClockRate,
+				Channels:  0,
+			},
+			PayloadType: 8,
+		},
+	}
 }
 
 func downsample24To8(pcm []byte) []int16 {

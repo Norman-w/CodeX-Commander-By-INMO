@@ -109,6 +109,31 @@ func TestWebRTCDataChannelEvents(t *testing.T) {
 	}
 }
 
+func TestWebRTCFramelessBidiDataChannelEvents(t *testing.T) {
+	type caption struct {
+		role string
+		text string
+		done bool
+	}
+	var captions []caption
+	session := newWebRTCSession(nil, config.Config{}, log.New("error"), webRTCEvents{
+		Caption: func(role, text string, done bool) {
+			captions = append(captions, caption{role: role, text: text, done: done})
+		},
+	})
+	session.handleDataChannel([]byte(`{"type":"input_transcript.added","item":{"text":"你好"}}`))
+	session.handleDataChannel([]byte(`{"type":"output_transcript.added","item":{"text":"我在。"}}`))
+	session.handleDataChannel([]byte(`{"type":"turn.done","turn":{"role":"assistant","transcript":"我在。"}}`))
+	want := []caption{
+		{role: "user", text: "你好"},
+		{role: "assistant", text: "我在。"},
+		{role: "assistant", text: "我在。", done: true},
+	}
+	if !reflect.DeepEqual(captions, want) {
+		t.Fatalf("unexpected Frameless Bidi captions: %#v", captions)
+	}
+}
+
 func TestWebRTCInputLifecycleRequiresOpenDataChannel(t *testing.T) {
 	session := newWebRTCSession(nil, config.Config{}, log.New("error"), webRTCEvents{})
 	if err := session.BeginInput(); err == nil || !strings.Contains(err.Error(), "not open") {

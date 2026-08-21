@@ -11,32 +11,87 @@ import (
 )
 
 type Config struct {
-	Host              string
-	Port              int
-	RuntimeDir        string
-	CWD               string
-	OriginAllowlist   map[string]struct{}
-	PairingFile       string
-	MediaRoot         string
-	MediaRoots        []string
-	AppServerMode     string
-	AppServerSocket   string
-	RealtimeTransport string
-	RealtimeVoice     string
-	CodexBin          string
-	ThreadID          string
-	ContextBindingID  string
-	AutoSelectLatest  bool
-	CodexModel        string
-	ApprovalPolicy    string
-	Sandbox           string
-	NetworkAccess     bool
-	AudioInputSource  string
-	LocalAudioOutput  string
-	RealtimeIdleMS    int
-	LogLevel          string
-	ProbeAudioPath    string
-	Version           string
+	Host               string
+	Port               int
+	RuntimeDir         string
+	CWD                string
+	OriginAllowlist    map[string]struct{}
+	PairingFile        string
+	MediaRoot          string
+	MediaRoots         []string
+	AppServerMode      string
+	AppServerSocket    string
+	RealtimeTransport  string
+	RealtimeVoice      string
+	CodexBin           string
+	ThreadID           string
+	ContextBindingID   string
+	AutoSelectLatest   bool
+	CodexModel         string
+	ApprovalPolicy     string
+	Sandbox            string
+	NetworkAccess      bool
+	AudioInputSource   string
+	AudioOutputTargets AudioOutputTargets
+	RealtimeIdleMS     int
+	LogLevel           string
+	ProbeAudioPath     string
+	Version            string
+}
+
+// AudioOutputTargets describes the independent destinations for assistant audio.
+type AudioOutputTargets struct {
+	Bridge bool `json:"bridge"`
+	Web    bool `json:"web"`
+	Visor  bool `json:"visor"`
+}
+
+func (targets AudioOutputTargets) Any() bool {
+	return targets.Bridge || targets.Web || targets.Visor
+}
+
+func (targets AudioOutputTargets) String() string {
+	if !targets.Any() {
+		return "none"
+	}
+	values := make([]string, 0, 3)
+	if targets.Bridge {
+		values = append(values, "bridge")
+	}
+	if targets.Web {
+		values = append(values, "web")
+	}
+	if targets.Visor {
+		values = append(values, "visor")
+	}
+	return strings.Join(values, ",")
+}
+
+func ParseAudioOutputTargets(raw string) (AudioOutputTargets, error) {
+	raw = strings.TrimSpace(strings.ToLower(raw))
+	switch raw {
+	case "none":
+		return AudioOutputTargets{}, nil
+	case "":
+		return AudioOutputTargets{}, errors.New("audio output targets cannot be empty; use none")
+	}
+
+	var targets AudioOutputTargets
+	for _, value := range strings.Split(raw, ",") {
+		switch strings.TrimSpace(value) {
+		case "bridge":
+			targets.Bridge = true
+		case "web":
+			targets.Web = true
+		case "visor":
+			targets.Visor = true
+		case "":
+			continue
+		default:
+			return AudioOutputTargets{}, fmt.Errorf("invalid audio output target: %s", value)
+		}
+	}
+	return targets, nil
 }
 
 func LoadDotEnv(path string) error {
@@ -149,32 +204,37 @@ func LoadFrom(getenv func(string) string, getwd func() (string, error)) (Config,
 
 	appServerMode := valueOr(getenv("COMMANDER_APP_SERVER_MODE"), "gui_shared")
 	realtimeTransport := valueOr(getenv("COMMANDER_REALTIME_TRANSPORT"), "auto")
+	audioOutputValue := valueOr(getenv("COMMANDER_AUDIO_OUTPUTS"), "bridge,visor")
+	audioOutputTargets, err := ParseAudioOutputTargets(audioOutputValue)
+	if err != nil {
+		return Config{}, fmt.Errorf("invalid COMMANDER_AUDIO_OUTPUTS: %w", err)
+	}
 	c := Config{
-		Host:              valueOr(getenv("COMMANDER_HOST"), "127.0.0.1"),
-		Port:              port,
-		RuntimeDir:        runtimeDir,
-		CWD:               root,
-		OriginAllowlist:   splitSet(getenv("COMMANDER_ORIGIN_ALLOWLIST")),
-		PairingFile:       absolute(pairingFile, runtimeDir),
-		MediaRoot:         mediaRoot,
-		AppServerMode:     appServerMode,
-		AppServerSocket:   getenv("COMMANDER_APP_SERVER_SOCKET"),
-		RealtimeTransport: realtimeTransport,
-		RealtimeVoice:     valueOr(getenv("COMMANDER_REALTIME_VOICE"), "juniper"),
-		CodexBin:          valueOr(getenv("COMMANDER_CODEX_BIN"), "codex"),
-		ThreadID:          getenv("COMMANDER_THREAD_ID"),
-		ContextBindingID:  getenv("COMMANDER_CONTEXT_BINDING_ID"),
-		AutoSelectLatest:  autoSelectLatest,
-		CodexModel:        getenv("COMMANDER_CODEX_MODEL"),
-		ApprovalPolicy:    valueOr(getenv("COMMANDER_APPROVAL_POLICY"), "on-request"),
-		Sandbox:           valueOr(getenv("COMMANDER_SANDBOX"), "workspace-write"),
-		NetworkAccess:     networkAccess,
-		AudioInputSource:  valueOr(getenv("COMMANDER_AUDIO_INPUT_SOURCE"), "mac"),
-		LocalAudioOutput:  valueOr(getenv("COMMANDER_LOCAL_AUDIO_OUTPUT"), "mac_and_visor"),
-		RealtimeIdleMS:    60_000,
-		LogLevel:          valueOr(getenv("COMMANDER_LOG_LEVEL"), "info"),
-		ProbeAudioPath:    probeAudioPath,
-		Version:           "0.1.0-go",
+		Host:               valueOr(getenv("COMMANDER_HOST"), "127.0.0.1"),
+		Port:               port,
+		RuntimeDir:         runtimeDir,
+		CWD:                root,
+		OriginAllowlist:    splitSet(getenv("COMMANDER_ORIGIN_ALLOWLIST")),
+		PairingFile:        absolute(pairingFile, runtimeDir),
+		MediaRoot:          mediaRoot,
+		AppServerMode:      appServerMode,
+		AppServerSocket:    getenv("COMMANDER_APP_SERVER_SOCKET"),
+		RealtimeTransport:  realtimeTransport,
+		RealtimeVoice:      valueOr(getenv("COMMANDER_REALTIME_VOICE"), "juniper"),
+		CodexBin:           valueOr(getenv("COMMANDER_CODEX_BIN"), "codex"),
+		ThreadID:           getenv("COMMANDER_THREAD_ID"),
+		ContextBindingID:   getenv("COMMANDER_CONTEXT_BINDING_ID"),
+		AutoSelectLatest:   autoSelectLatest,
+		CodexModel:         getenv("COMMANDER_CODEX_MODEL"),
+		ApprovalPolicy:     valueOr(getenv("COMMANDER_APPROVAL_POLICY"), "on-request"),
+		Sandbox:            valueOr(getenv("COMMANDER_SANDBOX"), "workspace-write"),
+		NetworkAccess:      networkAccess,
+		AudioInputSource:   valueOr(getenv("COMMANDER_AUDIO_INPUT_SOURCE"), "mac"),
+		AudioOutputTargets: audioOutputTargets,
+		RealtimeIdleMS:     60_000,
+		LogLevel:           valueOr(getenv("COMMANDER_LOG_LEVEL"), "info"),
+		ProbeAudioPath:     probeAudioPath,
+		Version:            "0.1.0-go",
 	}
 	if raw := getenv("COMMANDER_REALTIME_IDLE_MS"); raw != "" {
 		c.RealtimeIdleMS, err = strconv.Atoi(raw)
@@ -197,10 +257,6 @@ func LoadFrom(getenv func(string) string, getwd func() (string, error)) (Config,
 	if c.AudioInputSource != "visor" && c.AudioInputSource != "mac" {
 		return Config{}, fmt.Errorf("invalid COMMANDER_AUDIO_INPUT_SOURCE: %s", c.AudioInputSource)
 	}
-	if c.LocalAudioOutput != "visor_only" && c.LocalAudioOutput != "mac_only" && c.LocalAudioOutput != "mac_and_visor" {
-		return Config{}, fmt.Errorf("invalid COMMANDER_LOCAL_AUDIO_OUTPUT: %s", c.LocalAudioOutput)
-	}
-
 	c.MediaRoots = []string{root}
 	for _, entry := range strings.Split(getenv("COMMANDER_MEDIA_ROOTS"), ",") {
 		entry = strings.TrimSpace(entry)

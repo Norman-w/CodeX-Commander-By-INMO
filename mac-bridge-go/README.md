@@ -23,14 +23,15 @@ go -C mac-bridge-go build -o mac-bridge-go/bridge ./cmd/bridge
 ./mac-bridge-go/bridge
 ```
 
-默认监听 `127.0.0.1:8787`。配置项保持兼容，例如：
+默认监听 `127.0.0.1:8787`。配置示例：
 
 ```dotenv
 COMMANDER_APP_SERVER_MODE=gui_shared
 COMMANDER_CODEX_BIN=/Applications/ChatGPT.app/Contents/Resources/codex
 COMMANDER_CWD=/absolute/path/to/workspace
 COMMANDER_AUDIO_INPUT_SOURCE=visor
-COMMANDER_LOCAL_AUDIO_OUTPUT=mac_and_visor
+# bridge=Go Bridge/Mac 扬声器，web=8787 指挥中心网页扬声器，visor=AIR3 扬声器；可用 none 全部关闭
+COMMANDER_AUDIO_OUTPUTS=bridge,visor
 COMMANDER_REALTIME_TRANSPORT=auto
 COMMANDER_REALTIME_VOICE=juniper
 ```

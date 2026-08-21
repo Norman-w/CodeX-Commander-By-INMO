@@ -53,7 +53,7 @@ type Bridge struct {
 	ready                bool
 	sessions             map[string]*session
 	imageCards           []protocol.ImageCard
-	localAudioOutput     string
+	audioOutputs         config.AudioOutputTargets
 	audioInputSource     string
 	inputLevel           protocol.AudioLevel
 	outputLevel          protocol.AudioLevel
@@ -78,6 +78,10 @@ type Bridge struct {
 	nativeCaptureActive  bool
 	nativePlayer         *audio.Player
 	nativePlayerDisabled bool
+	nativePlayerRetryAt  time.Time
+	audioOutputChunks    int
+	audioOutputBytes     int
+	audioOutputLastAt    time.Time
 
 	journal       *EventJournal
 	dedupe        *RequestDeduplicator
@@ -92,7 +96,7 @@ func New(c config.Config, logger *log.Logger) *Bridge {
 		pairing:             security.NewPairingStore(c.PairingFile),
 		images:              media.NewService(c.MediaRoots, c.MediaRoot),
 		sessions:            make(map[string]*session),
-		localAudioOutput:    c.LocalAudioOutput,
+		audioOutputs:        c.AudioOutputTargets,
 		audioInputSource:    c.AudioInputSource,
 		audioInputTransport: "none",
 		voiceChatPhase:      "stopped",
@@ -168,6 +172,7 @@ func (b *Bridge) Stop(ctx context.Context) error {
 	b.audioMu.Lock()
 	player := b.nativePlayer
 	b.nativePlayer = nil
+	b.nativePlayerRetryAt = time.Time{}
 	b.audioMu.Unlock()
 	if player != nil {
 		player.Close()
@@ -191,10 +196,10 @@ func (b *Bridge) ValidateMediaToken(deviceID, token string) bool {
 	return b.pairing.IsTokenValid(deviceID, token)
 }
 
-func (b *Bridge) GetLocalAudioOutput() string {
+func (b *Bridge) GetAudioOutputTargets() config.AudioOutputTargets {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	return b.localAudioOutput
+	return b.audioOutputs
 }
 
 func (b *Bridge) GetAudioInputSource() string {
@@ -260,11 +265,25 @@ func (b *Bridge) AudioDiagnostics() map[string]any {
 		output = protocol.AudioLevel{}
 	}
 	events := append([]voiceDiagnosticEvent(nil), b.voiceEvents...)
+	audioOutputChunks := b.audioOutputChunks
+	audioOutputBytes := b.audioOutputBytes
+	audioOutputLastAt := int64(0)
+	if !b.audioOutputLastAt.IsZero() {
+		audioOutputLastAt = b.audioOutputLastAt.UnixMilli()
+	}
+	managementSinkCount := len(b.managementSinks)
+	b.audioMu.Lock()
+	nativePlayerReady := b.nativePlayer != nil
+	nativePlayerRetryAt := int64(0)
+	if !b.nativePlayerRetryAt.IsZero() {
+		nativePlayerRetryAt = b.nativePlayerRetryAt.UnixMilli()
+	}
+	b.audioMu.Unlock()
 	result := map[string]any{
 		"audioInputSource":    b.audioInputSource,
 		"audioInputDevice":    nullableString(b.audioInputDevice),
 		"audioInputTransport": b.audioInputTransport,
-		"localAudioOutput":    b.localAudioOutput,
+		"audioOutputTargets":  b.audioOutputs,
 		"voiceChatActive":     b.voiceChatActive,
 		"voiceChatPhase":      b.voiceChatPhase,
 		"voiceChatError":      nullableString(b.voiceChatError),
@@ -276,6 +295,12 @@ func (b *Bridge) AudioDiagnostics() map[string]any {
 		"input":               input,
 		"output":              output,
 		"voiceEvents":         events,
+		"audioOutputChunks":   audioOutputChunks,
+		"audioOutputBytes":    audioOutputBytes,
+		"audioOutputLastAt":   audioOutputLastAt,
+		"managementSinkCount": managementSinkCount,
+		"nativePlayerReady":   nativePlayerReady,
+		"nativePlayerRetryAt": nativePlayerRetryAt,
 	}
 	b.mu.RUnlock()
 	return result
@@ -296,27 +321,24 @@ func (b *Bridge) SetAudioInputSource(source string) {
 	}
 }
 
-func (b *Bridge) SetLocalAudioOutput(output string) {
-	if output != "visor_only" && output != "mac_only" && output != "mac_and_visor" {
+func (b *Bridge) SetAudioOutputTargets(targets config.AudioOutputTargets) {
+	b.mu.Lock()
+	b.audioOutputs = targets
+	b.mu.Unlock()
+	b.audioMu.Lock()
+	defer b.audioMu.Unlock()
+	if targets.Bridge {
+		b.nativePlayerDisabled = false
+		b.nativePlayerRetryAt = time.Time{}
+		b.ensureNativePlayerLocked()
 		return
 	}
-	b.mu.Lock()
-	previous := b.localAudioOutput
-	b.localAudioOutput = output
-	active := b.audioResponseActive
-	b.mu.Unlock()
-	b.voice.SetLocalAudioOutput(output)
-	if output == "mac_only" || output == "mac_and_visor" {
-		b.audioMu.Lock()
-		b.nativePlayerDisabled = false
-		b.audioMu.Unlock()
+	if b.nativePlayer != nil {
+		b.nativePlayer.Close()
+		b.nativePlayer = nil
 	}
-	if output == "mac_only" && previous != output && active {
-		b.mu.Lock()
-		b.audioResponseActive = false
-		b.mu.Unlock()
-		b.publish(b.journal.Create(map[string]any{"type": "assistant_audio_end"}, false))
-	}
+	b.nativePlayerDisabled = false
+	b.nativePlayerRetryAt = time.Time{}
 }
 
 func (b *Bridge) StartVoiceChat(ctx context.Context) error {
@@ -331,9 +353,16 @@ func (b *Bridge) StartVoiceChat(ctx context.Context) error {
 	b.voiceChatError = ""
 	b.voiceTurnActive = false
 	b.audioResponseActive = false
+	b.audioOutputChunks = 0
+	b.audioOutputBytes = 0
+	b.audioOutputLastAt = time.Time{}
 	b.diagnosticActive = false
+	audioOutputs := b.audioOutputs
 	b.mu.Unlock()
 	b.stopNativeInput()
+	if audioOutputs.Bridge {
+		b.prepareNativeAudioOutput()
+	}
 	if err := b.voice.StartSession(ctx); err != nil {
 		b.mu.Lock()
 		b.voiceChatPhase = "error"
@@ -873,29 +902,31 @@ func (b *Bridge) publishImage(image protocol.ImageCard) {
 }
 
 func (b *Bridge) handleVoiceAudio(audio []byte) {
-	b.mu.RLock()
+	b.mu.Lock()
 	if b.anyPTTLocked() {
-		b.mu.RUnlock()
+		b.mu.Unlock()
 		return
 	}
-	output := b.localAudioOutput
+	outputs := b.audioOutputs
 	audioStarted := b.audioResponseActive
-	b.mu.RUnlock()
+	b.audioOutputChunks++
+	b.audioOutputBytes += len(audio)
+	b.audioOutputLastAt = time.Now()
 	if !audioStarted {
-		b.mu.Lock()
 		b.audioResponseActive = true
-		b.mu.Unlock()
+	}
+	b.mu.Unlock()
+	if !audioStarted {
 		b.recordVoiceEvent(voiceDiagnosticEvent{Type: "audio_start"})
 		b.publish(b.journal.Create(map[string]any{"type": "assistant_audio_start", "sampleRate": protocol.AudioSampleRate, "channels": protocol.AudioChannels, "encoding": protocol.AudioEncoding}, false))
 	}
-	if output != "mac_only" {
+	if outputs.Visor {
 		b.publishBinary(audio)
 	}
-	nativePlayed := false
-	if output != "visor_only" {
-		nativePlayed = b.playNativeAudio(audio)
+	if outputs.Bridge {
+		b.playNativeAudio(audio)
 	}
-	if output != "visor_only" && !nativePlayed {
+	if outputs.Web {
 		b.mu.RLock()
 		sinks := make([]func([]byte), 0, len(b.managementSinks))
 		for _, sink := range b.managementSinks {
@@ -976,23 +1007,50 @@ func (b *Bridge) stopNativeInput() {
 
 func (b *Bridge) playNativeAudio(pcm []byte) bool {
 	b.audioMu.Lock()
-	defer b.audioMu.Unlock()
-	if b.nativePlayerDisabled {
+	if !b.ensureNativePlayerLocked() {
+		b.audioMu.Unlock()
 		return false
 	}
-	if b.nativePlayer == nil {
-		player, err := audio.NewPlayer()
-		if err != nil {
-			b.nativePlayerDisabled = true
-			b.logger.Warn("Go native audio output unavailable", map[string]any{"error": err.Error()})
-			return false
-		}
-		b.nativePlayer = player
-	}
 	if err := b.nativePlayer.Play(pcm); err != nil {
+		player := b.nativePlayer
+		b.nativePlayer = nil
+		b.nativePlayerDisabled = true
+		b.nativePlayerRetryAt = time.Now().Add(750 * time.Millisecond)
+		b.audioMu.Unlock()
+		if player != nil {
+			player.Close()
+		}
 		b.logger.Warn("Go native audio output failed", map[string]any{"error": err.Error()})
 		return false
 	}
+	b.audioMu.Unlock()
+	return true
+}
+
+func (b *Bridge) prepareNativeAudioOutput() {
+	b.audioMu.Lock()
+	b.ensureNativePlayerLocked()
+	b.audioMu.Unlock()
+}
+
+func (b *Bridge) ensureNativePlayerLocked() bool {
+	if b.nativePlayer != nil {
+		return true
+	}
+	now := time.Now()
+	if b.nativePlayerDisabled && now.Before(b.nativePlayerRetryAt) {
+		return false
+	}
+	player, err := audio.NewPlayer()
+	if err != nil {
+		b.nativePlayerDisabled = true
+		b.nativePlayerRetryAt = now.Add(750 * time.Millisecond)
+		b.logger.Warn("Go native audio output unavailable; will retry", map[string]any{"error": err.Error()})
+		return false
+	}
+	b.nativePlayer = player
+	b.nativePlayerDisabled = false
+	b.nativePlayerRetryAt = time.Time{}
 	return true
 }
 

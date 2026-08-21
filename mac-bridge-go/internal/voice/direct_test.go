@@ -55,7 +55,7 @@ func TestVoiceStreamsCoreRealtimePCMWithoutBrowser(t *testing.T) {
 	host := &fakeHost{}
 	audio := make(chan []byte, 1)
 	audioEnd := make(chan string, 1)
-	v := New(host, config.Config{CWD: t.TempDir(), AudioInputSource: "visor", LocalAudioOutput: "visor_only"}, log.New("error"), Events{
+	v := New(host, config.Config{CWD: t.TempDir(), AudioInputSource: "visor"}, log.New("error"), Events{
 		Audio:    func(value []byte) { audio <- value },
 		AudioEnd: func(value string) { audioEnd <- value },
 	})

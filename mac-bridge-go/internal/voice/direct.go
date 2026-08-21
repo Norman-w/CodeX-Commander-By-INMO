@@ -67,7 +67,6 @@ type Voice struct {
 	outputTimer     *time.Timer
 	replyTimer      *time.Timer
 	inputSource     string
-	localOutput     string
 	closed          bool
 	sessionStart    chan struct{}
 	sessionStartErr error
@@ -77,7 +76,7 @@ type Voice struct {
 }
 
 func New(host Host, c config.Config, logger *log.Logger, events Events) *Voice {
-	voice := &Voice{host: host, config: c, logger: logger, events: events, inputSource: c.AudioInputSource, localOutput: c.LocalAudioOutput}
+	voice := &Voice{host: host, config: c, logger: logger, events: events, inputSource: c.AudioInputSource}
 	voice.unsubscribe = host.SubscribeNotifications(func(notification appserver.Notification) {
 		voice.HandleNotification(notification.Method, notification.Params)
 	})
@@ -448,12 +447,6 @@ func (v *Voice) SpeakSummary(ctx context.Context, summary string) error {
 func (v *Voice) SetAudioInputSource(source string) {
 	v.mu.Lock()
 	v.inputSource = source
-	v.mu.Unlock()
-}
-
-func (v *Voice) SetLocalAudioOutput(output string) {
-	v.mu.Lock()
-	v.localOutput = output
 	v.mu.Unlock()
 }
 

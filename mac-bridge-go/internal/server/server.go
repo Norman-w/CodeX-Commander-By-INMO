@@ -251,10 +251,10 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		writeJSON(w, http.StatusOK, map[string]any{
-			"audioInputSource": s.bridge.GetAudioInputSource(),
-			"localAudioOutput": s.bridge.GetLocalAudioOutput(),
-			"inputOptions":     []string{"visor", "mac"},
-			"outputOptions":    []string{"visor_only", "mac_only", "mac_and_visor"},
+			"audioInputSource":   s.bridge.GetAudioInputSource(),
+			"audioOutputTargets": s.bridge.GetAudioOutputTargets(),
+			"inputOptions":       []string{"visor", "mac"},
+			"outputOptions":      []string{"bridge", "web", "visor"},
 		})
 	case http.MethodPut:
 		payload, err := readJSON(r)
@@ -268,10 +268,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		input, inputSet := value["audioInputSource"]
-		output, outputSet := value["localAudioOutput"]
-		if legacy, ok := output.(bool); ok {
-			output = map[bool]string{true: "mac_and_visor", false: "visor_only"}[legacy]
-		}
+		outputTargets, outputTargetsSet := value["audioOutputTargets"]
 		if inputSet {
 			inputText, ok := input.(string)
 			if !ok || (inputText != "visor" && inputText != "mac") {
@@ -280,18 +277,47 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			}
 			s.bridge.SetAudioInputSource(inputText)
 		}
-		if outputSet {
-			outputText, ok := output.(string)
-			if !ok || (outputText != "visor_only" && outputText != "mac_only" && outputText != "mac_and_visor") {
-				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "localAudioOutput must be visor_only, mac_only, or mac_and_visor"})
+		if outputTargetsSet {
+			targets, parseErr := parseAudioOutputTargets(outputTargets)
+			if parseErr != nil {
+				s.writeError(w, parseErr)
 				return
 			}
-			s.bridge.SetLocalAudioOutput(outputText)
+			s.bridge.SetAudioOutputTargets(targets)
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "audioInputSource": s.bridge.GetAudioInputSource(), "localAudioOutput": s.bridge.GetLocalAudioOutput()})
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":                 true,
+			"audioInputSource":   s.bridge.GetAudioInputSource(),
+			"audioOutputTargets": s.bridge.GetAudioOutputTargets(),
+		})
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
 	}
+}
+
+func parseAudioOutputTargets(value any) (config.AudioOutputTargets, error) {
+	object, ok := value.(map[string]any)
+	if !ok {
+		return config.AudioOutputTargets{}, errors.New("audioOutputTargets must be an object")
+	}
+	targets := config.AudioOutputTargets{}
+	for key, raw := range object {
+		value, ok := raw.(bool)
+		if !ok {
+			return config.AudioOutputTargets{}, fmt.Errorf("audioOutputTargets.%s must be boolean", key)
+		}
+		switch key {
+		case "bridge":
+			targets.Bridge = value
+		case "web":
+			targets.Web = value
+		case "visor":
+			targets.Visor = value
+		default:
+			return config.AudioOutputTargets{}, fmt.Errorf("unknown audio output target: %s", key)
+		}
+	}
+	return targets, nil
 }
 
 func (s *Server) handleVoiceTarget(w http.ResponseWriter, r *http.Request) {

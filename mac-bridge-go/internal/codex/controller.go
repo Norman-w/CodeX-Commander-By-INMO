@@ -25,6 +25,8 @@ const (
 )
 
 var voiceSessionNamePattern = regexp.MustCompile(`^No\.([0-9]+) [0-9]{2}-[0-9]{2}$`)
+var realtimeInputPattern = regexp.MustCompile(`(?s)<input>\s*(.*?)\s*</input>`)
+var internalTagPattern = regexp.MustCompile(`<[^>]+>`)
 
 type TaskEvent struct {
 	ThreadID string
@@ -904,7 +906,9 @@ func (c *Controller) threadSummary(thread threadRecord) protocol.ThreadSummary {
 	} else if statusType == "idle" || statusType == "notLoaded" || statusType == "" {
 		status = "idle"
 	}
-	return protocol.ThreadSummary{ID: thread.ID, Title: privacy.SanitizeForVisor(firstNonEmpty(thread.Name, thread.Preview, "未命名 Codex 任务"), 240, []string{c.config.CWD}), Preview: privacy.SanitizeForVisor(thread.Preview, 1_000, []string{c.config.CWD}), Status: status, UpdatedAt: thread.UpdatedAt}
+	preview := cleanThreadPreview(thread.Preview, c.config.CWD)
+	title := privacy.SanitizeForVisor(firstNonEmpty(thread.Name, preview, "未命名 Codex 任务"), 240, []string{c.config.CWD})
+	return protocol.ThreadSummary{ID: thread.ID, Title: title, Preview: preview, Status: status, UpdatedAt: thread.UpdatedAt}
 }
 
 func (c *Controller) appendProgress(threadID, turnID, delta string) {
@@ -984,7 +988,29 @@ func isCommanderThreadSource(value string) bool {
 
 func parseThread(value any) threadRecord {
 	thread := asMap(value)
-	return threadRecord{ID: stringValue(thread["id"]), Name: stringValue(thread["name"]), Preview: stringValue(thread["preview"]), UpdatedAt: int64Value(thread["updatedAt"]), ThreadSource: stringValue(thread["threadSource"]), Status: asMap(thread["status"]), Turns: anySlice(thread["turns"]), CWD: stringValue(thread["cwd"])}
+	return threadRecord{ID: stringValue(thread["id"]), Name: stringValue(thread["name"]), Preview: stringValue(thread["preview"]), UpdatedAt: normalizeUnixMillis(int64Value(thread["updatedAt"])), ThreadSource: stringValue(thread["threadSource"]), Status: asMap(thread["status"]), Turns: anySlice(thread["turns"]), CWD: stringValue(thread["cwd"])}
+}
+
+func cleanThreadPreview(value, cwd string) string {
+	value = privacy.SanitizeForVisor(value, 1_000, []string{cwd})
+	if strings.Contains(value, "<realtime_delegation>") {
+		matches := realtimeInputPattern.FindAllStringSubmatch(value, -1)
+		if len(matches) > 0 {
+			value = matches[len(matches)-1][1]
+		} else {
+			return ""
+		}
+	}
+	value = internalTagPattern.ReplaceAllString(value, " ")
+	value = strings.Join(strings.Fields(value), " ")
+	return truncateRunes(value, 240)
+}
+
+func normalizeUnixMillis(value int64) int64 {
+	if value > 0 && value < 1_000_000_000_000 {
+		return value * 1_000
+	}
+	return value
 }
 
 func latestSummary(thread threadRecord) string {

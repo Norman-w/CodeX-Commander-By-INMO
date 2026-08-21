@@ -90,9 +90,32 @@ const managementPage = `<!doctype html>
     .control-dock { width: min(620px, 100%); margin-top: 38px; padding: 16px; border: 1px solid var(--line); background: var(--panel); box-shadow: 0 24px 80px rgba(0,0,0,.2); backdrop-filter: blur(18px); }
     .control-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
     .target-field { grid-column: 1 / -1; }
+    .input-field { grid-column: 1; }
+    .output-field { grid-column: 2; }
     .field { display: grid; gap: 8px; text-align: left; }
     .field-label { color: var(--dim); font: 10px "SF Mono", Menlo, monospace; letter-spacing: .12em; text-transform: uppercase; }
     .field-note { color: var(--dim); font-size: 11px; }
+    .flight-switch { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .flight-option { position: relative; display: block; min-width: 0; cursor: pointer; }
+    .flight-option input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+    .flight-face { display: grid; min-height: 58px; align-content: center; gap: 5px; padding: 10px 13px; border: 1px solid var(--line); color: var(--muted); background: linear-gradient(145deg, rgba(255,255,255,.07), rgba(0,0,0,.18)); transition: border-color .2s ease, background .2s ease, color .2s ease, box-shadow .2s ease, transform .2s ease; }
+    .flight-face strong, .output-switch strong { font: 11px "SF Mono", Menlo, monospace; letter-spacing: .08em; }
+    .flight-face small, .output-switch small { color: var(--dim); font-size: 11px; line-height: 1.25; }
+    .flight-face strong, .flight-face small, .output-switch strong, .output-switch small { display: block; }
+    .flight-option input:checked + .flight-face { border-color: var(--input); color: var(--ink); background: linear-gradient(145deg, rgba(114,185,255,.2), rgba(0,0,0,.18)); box-shadow: inset 0 0 0 1px rgba(114,185,255,.18), 0 8px 22px rgba(0,0,0,.16); }
+    .flight-option input:checked + .flight-face small { color: var(--input); }
+    .flight-option input:focus-visible + .flight-face { outline: 2px solid var(--signal); outline-offset: 3px; }
+    .flight-option:has(input:disabled) { cursor: not-allowed; }
+    .flight-option input:disabled + .flight-face { opacity: .38; }
+    .output-switches { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    .output-switch { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 9px; min-height: 70px; padding: 10px 11px; border-color: var(--line); color: var(--muted); background: linear-gradient(145deg, rgba(255,255,255,.07), rgba(0,0,0,.18)); text-align: left; }
+    .output-switch > span:nth-child(2) { min-width: 0; }
+    .output-switch:hover:not(:disabled) { border-color: rgba(243,210,122,.62); background: linear-gradient(145deg, rgba(243,210,122,.14), rgba(0,0,0,.18)); }
+    .output-switch[aria-pressed="true"] { border-color: var(--output); color: var(--ink); background: linear-gradient(145deg, rgba(255,154,106,.2), rgba(0,0,0,.18)); box-shadow: inset 0 0 0 1px rgba(255,154,106,.16), 0 8px 22px rgba(0,0,0,.16); }
+    .output-switch[aria-pressed="true"] small, .output-switch[aria-pressed="true"] .switch-state { color: var(--output); }
+    .output-switch-light { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); box-shadow: 0 0 0 transparent; }
+    .output-switch[aria-pressed="true"] .output-switch-light { background: var(--output); box-shadow: 0 0 14px rgba(255,154,106,.85); }
+    .switch-state { color: var(--dim); font: 10px "SF Mono", Menlo, monospace; letter-spacing: .08em; }
     select, button { width: 100%; min-height: 48px; border: 1px solid var(--line); border-radius: 0; padding: 12px 13px; color: var(--ink); background: rgba(0,0,0,.22); font: inherit; transition: border-color .2s ease, background .2s ease, opacity .2s ease, transform .2s ease; }
     select:focus-visible, button:focus-visible { outline: 2px solid var(--signal); outline-offset: 3px; }
     select:disabled { color: var(--dim); opacity: .5; }
@@ -133,7 +156,7 @@ const managementPage = `<!doctype html>
     .hint { color: var(--muted); font-size: 12px; line-height: 1.55; }
     footer { display: flex; justify-content: space-between; gap: 20px; margin-top: 22px; color: var(--dim); font: 10px "SF Mono", Menlo, monospace; letter-spacing: .08em; text-transform: uppercase; }
     @media (max-width: 900px) { .workspace { grid-template-columns: 86px minmax(0, 1fr) 86px; gap: 24px; } h1 { font-size: clamp(42px, 8vw, 72px); } }
-    @media (max-width: 680px) { main { min-height: 100svh; padding-top: 20px; } .topbar { align-items: flex-start; flex-direction: column; } .system-readout { align-self: stretch; justify-content: space-between; } .workspace { grid-template-columns: repeat(2, minmax(0, 1fr)); flex: 0 0 auto; gap: 12px; min-height: 0; padding-top: 16px; } .call-stage { grid-column: 1 / -1; grid-row: 1; min-height: 0; padding-top: 0; } .signal-left { grid-column: 1; grid-row: 2; min-height: 0; } .signal-right { grid-column: 2; grid-row: 2; min-height: 0; } .rail-track { min-height: 80px; margin: 10px auto; } .control-dock { margin-top: 22px; } .control-grid, .action-row { grid-template-columns: 1fr; } .voice-event { grid-template-columns: 1fr; gap: 7px; } .log-panel { right: 12px; bottom: 12px; left: 12px; max-height: 58svh; padding: 18px 16px 14px; } footer { flex-direction: column; } }
+    @media (max-width: 680px) { main { min-height: 100svh; padding-top: 20px; } .topbar { align-items: flex-start; flex-direction: column; } .system-readout { align-self: stretch; justify-content: space-between; } .workspace { grid-template-columns: repeat(2, minmax(0, 1fr)); flex: 0 0 auto; gap: 12px; min-height: 0; padding-top: 16px; } .call-stage { grid-column: 1 / -1; grid-row: 1; min-height: 0; padding-top: 0; } .signal-left { grid-column: 1; grid-row: 2; min-height: 0; } .signal-right { grid-column: 2; grid-row: 2; min-height: 0; } .rail-track { min-height: 80px; margin: 10px auto; } .control-dock { margin-top: 22px; } .control-grid, .action-row, .flight-switch, .output-switches { grid-template-columns: 1fr; } .voice-event { grid-template-columns: 1fr; gap: 7px; } .log-panel { right: 12px; bottom: 12px; left: 12px; max-height: 58svh; padding: 18px 16px 14px; } footer { flex-direction: column; } }
     @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }
 
     /* Fixed one-screen console: the bridge page must never become a document-sized scroll view. */
@@ -188,7 +211,20 @@ const managementPage = `<!doctype html>
       .call-button { width: clamp(88px, 11vh, 124px); height: clamp(88px, 11vh, 124px); min-height: clamp(88px, 11vh, 124px); border-width: clamp(6px, .65vh, 8px); }
       .call-button svg { width: clamp(30px, 3.6vh, 40px); height: clamp(30px, 3.6vh, 40px); }
       .call-action-name { margin-top: 10px; }
-      .control-dock { margin-top: 10px; padding: clamp(8px, 1vh, 12px); }
+      .control-dock { margin-top: 6px; padding: 8px; }
+      .control-grid { gap: 5px 8px; }
+      .field { gap: 3px; }
+      .flight-face { min-height: 48px; gap: 2px; padding: 7px 9px; }
+      .output-switch { min-height: 54px; gap: 5px; padding: 6px 7px; }
+      .flight-face strong, .output-switch strong { font-size: 9px; letter-spacing: .04em; }
+      .flight-face small, .output-switch small { font-size: 9px; line-height: 1.1; }
+      .switch-state { font-size: 9px; }
+      .action-row { gap: 6px; margin-top: 5px; }
+      .audio-key { min-height: 38px; gap: 8px; padding: 5px 8px; }
+      .key-icon { width: 26px; height: 26px; flex-basis: 26px; }
+      .key-icon svg { width: 15px; height: 15px; }
+      .status-line { min-height: 16px; margin-top: 4px; font-size: 11px; }
+      .control-hint { margin-top: 1px; font-size: 10px; line-height: 1.2; }
     }
     @media (max-height: 760px) {
       main { padding-top: 10px; padding-bottom: 10px; }
@@ -223,6 +259,7 @@ const managementPage = `<!doctype html>
       .rail-values { display: none; }
       h1 { font-size: clamp(48px, 13vw, 78px); }
       .control-grid { grid-template-columns: 1fr; }
+      .input-field, .output-field { grid-column: 1 / -1; }
       .target-field { grid-column: 1 / -1; }
       .control-dock { max-height: none; }
     }
@@ -261,8 +298,15 @@ const managementPage = `<!doctype html>
         </div>
         <div class="control-dock">
           <div class="control-grid">
-            <label class="field"><span class="field-label">输入来源</span><select id="audioInput" disabled><option value="mac">电脑麦克风</option><option value="visor">眼镜麦克风</option></select><span class="field-note">电脑麦克风，或眼镜按住 PTT。</span></label>
-            <label class="field"><span class="field-label">回复播放到</span><select id="localAudio" disabled><option value="mac_and_visor">电脑 + 眼镜</option><option value="mac_only">仅电脑</option><option value="visor_only">仅眼镜</option></select><span class="field-note">选择 Code X 的声音播放位置。</span></label>
+            <div class="field input-field"><span class="field-label">输入来源 · 单路选择</span><div id="audioInput" class="flight-switch" role="radiogroup" aria-label="输入音频来源">
+              <label class="flight-option"><input type="radio" name="audioInputSource" value="mac" checked disabled><span class="flight-face"><strong>BRIDGE / MAC</strong><small>电脑麦克风</small></span></label>
+              <label class="flight-option"><input type="radio" name="audioInputSource" value="visor" disabled><span class="flight-face"><strong>AIR3 / VISOR</strong><small>眼镜麦克风 · PTT</small></span></label>
+            </div><span class="field-note">输入只能选择一个来源，像飞机的输入通道选择开关。</span></div>
+            <div class="field output-field"><span class="field-label">回复播放到 · 多路独立</span><div class="output-switches" role="group" aria-label="回复音频播放目的地">
+              <button class="output-switch" data-audio-output="bridge" type="button" aria-pressed="false" disabled><span class="output-switch-light"></span><span><strong>BRIDGE 本地</strong><small>Go 直接发声 · Mac 扬声器</small></span><span class="switch-state">OFF</span></button>
+              <button class="output-switch" data-audio-output="web" type="button" aria-pressed="false" disabled><span class="output-switch-light"></span><span><strong>指挥中心网页</strong><small>8787 页面扬声器</small></span><span class="switch-state">OFF</span></button>
+              <button class="output-switch" data-audio-output="visor" type="button" aria-pressed="false" disabled><span class="output-switch-light"></span><span><strong>INMO AIR3</strong><small>眼镜扬声器</small></span><span class="switch-state">OFF</span></button>
+            </div><span class="field-note">每一路可单独开关，三路可以同时播放，也可以全部关闭。</span></div>
           </div>
           <div class="action-row">
             <button id="sampleButton" class="audio-key sample-key" type="button" disabled><span class="key-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m9 6 9 6-9 6V6Z" /></svg></span><span id="sampleButtonLabel">注入链路信号</span></button>
@@ -286,8 +330,8 @@ const managementPage = `<!doctype html>
   </main>
   <script>
     const voiceTargetControl = document.querySelector('#voiceTarget');
-    const inputControl = document.querySelector('#audioInput');
-    const outputControl = document.querySelector('#localAudio');
+    const inputOptions = [...document.querySelectorAll('input[name="audioInputSource"]')];
+    const outputControls = [...document.querySelectorAll('[data-audio-output]')];
     const voiceChatButton = document.querySelector('#voiceChatButton');
     const voiceChatButtonLabel = document.querySelector('#voiceChatButtonLabel');
     const voiceChatStatus = document.querySelector('#voiceChatStatus');
@@ -325,49 +369,101 @@ const managementPage = `<!doctype html>
     let pendingSample = false;
     let actionMessage = '';
     let managementSocket = null;
+    let managementSocketPromise = null;
     let macCapture = null;
     let toneContext = null;
+    let webPlaybackContext = null;
+    let webPlaybackNextTime = 0;
+    const webPlaybackSources = new Set();
+    const pendingWebPcm = [];
+    let pendingWebPcmBytes = 0;
+    let webPlaybackResumePromise = null;
+    const maxPendingWebPcmBytes = 24000 * 2 * 2;
     let dialToneTimer = null;
     let callToneSession = false;
     let callToneConnected = false;
     let autoOpenMicAfterDial = false;
     let renderedTranscriptSignature = null;
     let lastAudioEndId = null;
-    const outputLabels = { visor_only: '仅眼镜', mac_only: '仅电脑', mac_and_visor: '电脑 + 眼镜' };
-    const inputLabels = { visor: '眼镜麦克风', mac: '电脑麦克风' };
+    let voiceTargetSignature = null;
+    let pendingNewVoiceTarget = false;
+    let voiceTargetSelectionReady = false;
+    let voiceTargetMenuOpen = false;
+    let voiceTargetPollInFlight = false;
+    let audioSettingsWriteInFlight = 0;
+    let audioSettingsWriteVersion = 0;
+    let audioOutputTargets = { bridge: false, web: false, visor: false };
+    const outputLabels = { bridge: 'Bridge 本地', web: '指挥中心网页', visor: 'INMO AIR3' };
+    const inputLabels = { visor: 'AIR3 麦克风', mac: 'Mac 麦克风' };
     const transportLabels = { none: '未开始采集', visor: '眼镜通道', management_page: '8787 网页通道', native: 'Go 原生通道' };
     const clamp = (value) => Math.max(0, Math.min(1, Number(value) || 0));
     const meterWidth = (level) => Math.min(100, Math.max(0, Math.round(clamp(level.peak) * 100)));
     const showAction = (message) => { actionMessage = message; status.textContent = message; };
-    const audioSummary = () => '输入：' + (inputLabels[inputControl.value] || inputControl.value) + '；输出：' + (outputLabels[outputControl.value] || outputControl.value);
-    const targetTime = (updatedAt) => {
-      if (!Number.isFinite(Number(updatedAt))) return '';
-      return new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(Number(updatedAt)));
+    const getInputSource = () => inputOptions.find((option) => option.checked)?.value || 'mac';
+    const setInputSource = (value) => {
+      const source = value === 'visor' ? 'visor' : 'mac';
+      inputOptions.forEach((option) => { option.checked = option.value === source; });
+    };
+    const normalizeAudioOutputTargets = (value) => {
+      const source = value && typeof value === 'object' ? value : {};
+      return { bridge: source.bridge === true, web: source.web === true, visor: source.visor === true };
+    };
+    const audioOutputTargetsEqual = (left, right) => left.bridge === right.bridge && left.web === right.web && left.visor === right.visor;
+    const getAudioOutputTargets = () => ({ ...audioOutputTargets });
+    const setAudioControlsDisabled = (disabled) => {
+      inputOptions.forEach((option) => { option.disabled = disabled; });
+      outputControls.forEach((control) => { control.disabled = disabled; });
+    };
+    const setAudioOutputTargets = (value) => {
+      const next = normalizeAudioOutputTargets(value);
+      const webWasEnabled = audioOutputTargets.web;
+      audioOutputTargets = next;
+      outputControls.forEach((control) => {
+        const enabled = next[control.dataset.audioOutput] === true;
+        control.setAttribute('aria-pressed', String(enabled));
+        const state = control.querySelector('.switch-state');
+        if (state) state.textContent = enabled ? 'ON' : 'OFF';
+      });
+      if (webWasEnabled && !next.web) stopWebPlayback();
+    };
+    const audioSummary = () => {
+      const outputs = Object.keys(outputLabels).filter((key) => audioOutputTargets[key]).map((key) => outputLabels[key]);
+      return '输入：' + (inputLabels[getInputSource()] || getInputSource()) + '；输出：' + (outputs.length ? outputs.join(' + ') : '关闭所有输出');
+    };
+    const displayThreadTitle = (thread) => {
+      const title = String(thread?.title || '').replace(/\s+/g, ' ').trim();
+      if (!title || /<[^>]+>/.test(title) || title.includes('realtime_delegation')) return '未命名 Codex 会话';
+      return title;
     };
     const updateVoiceTargetState = (value) => {
       const threads = Array.isArray(value.threads) ? value.threads : [];
       const selected = typeof value.selectedThreadId === 'string' ? value.selectedThreadId : '';
       const previous = voiceTargetControl.value;
-      voiceTargetControl.replaceChildren();
-      const placeholder = document.createElement('option');
-      placeholder.value = '';
-      placeholder.textContent = threads.length ? '请选择通话会话' : '暂无可用 Codex 会话';
-      voiceTargetControl.appendChild(placeholder);
-      threads.forEach((thread, index) => {
-        const option = document.createElement('option');
-        option.value = thread.id;
-        const time = targetTime(thread.updatedAt);
-        const preview = String(thread.preview || '').replace(/\s+/g, ' ').slice(0, 42);
-        option.textContent = [thread.title || '未命名 Codex', time, preview].filter(Boolean).join(' · ');
-        option.dataset.order = String(index);
-        voiceTargetControl.appendChild(option);
-      });
-      const newOption = document.createElement('option');
-      newOption.value = '__new__';
-      newOption.textContent = '＋ 新建 Codex 会话';
-      voiceTargetControl.appendChild(newOption);
-      if (selected && threads.some((thread) => thread.id === selected)) voiceTargetControl.value = selected;
-      else if (previous && [...voiceTargetControl.options].some((option) => option.value === previous)) voiceTargetControl.value = previous;
+      const signature = threads.map((thread) => [thread.id, thread.title, thread.status].join('\u001f')).join('\u001e');
+      if (signature !== voiceTargetSignature) {
+        const options = document.createDocumentFragment();
+        const placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = threads.length ? '请选择通话会话' : '暂无现有会话 · 可选择新建';
+        options.appendChild(placeholder);
+        threads.forEach((thread, index) => {
+          const option = document.createElement('option');
+          option.value = thread.id;
+          option.textContent = displayThreadTitle(thread);
+          option.dataset.order = String(index);
+          options.appendChild(option);
+        });
+        const newOption = document.createElement('option');
+        newOption.value = '__new__';
+        newOption.textContent = '＋ 新建 Codex 会话（拨打时创建）';
+        options.appendChild(newOption);
+        voiceTargetControl.replaceChildren(options);
+        voiceTargetSignature = signature;
+      }
+      const hasPendingNew = pendingNewVoiceTarget && [...voiceTargetControl.options].some((option) => option.value === '__new__');
+      if (hasPendingNew) voiceTargetControl.value = '__new__';
+      else if (voiceTargetSelectionReady && selected && threads.some((thread) => thread.id === selected)) voiceTargetControl.value = selected;
+      else if (voiceTargetSelectionReady && previous && [...voiceTargetControl.options].some((option) => option.value === previous)) voiceTargetControl.value = previous;
       else voiceTargetControl.value = '';
       const phase = value.voiceChatPhase || (value.voiceChatActive ? 'connected' : 'stopped');
       voiceTargetControl.disabled = value.voiceChatActive === true || phase === 'starting' || phase === 'stopping';
@@ -521,14 +617,130 @@ const managementPage = `<!doctype html>
       }
       return output.buffer;
     };
-    const openManagementSocket = () => new Promise((resolve, reject) => {
-      if (managementSocket && managementSocket.readyState === WebSocket.OPEN) return resolve(managementSocket);
+    const getWebPlaybackContext = () => {
+      const Context = window.AudioContext || window.webkitAudioContext;
+      if (!Context) throw new Error('当前浏览器不支持网页音频播放');
+      if (!webPlaybackContext) webPlaybackContext = new Context({ latencyHint: 'interactive' });
+      return webPlaybackContext;
+    };
+    const copyPcmBuffer = (data) => {
+      if (data instanceof ArrayBuffer) return data.slice(0);
+      if (ArrayBuffer.isView(data)) return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+      return null;
+    };
+    const queueWebPcm = (data) => {
+      const bytes = copyPcmBuffer(data);
+      if (!bytes || bytes.byteLength < 2 || bytes.byteLength % 2 !== 0) return;
+      pendingWebPcm.push(bytes);
+      pendingWebPcmBytes += bytes.byteLength;
+      while (pendingWebPcmBytes > maxPendingWebPcmBytes && pendingWebPcm.length > 1) {
+        const removed = pendingWebPcm.shift();
+        pendingWebPcmBytes -= removed.byteLength;
+      }
+    };
+    const stopWebPlayback = () => {
+      for (const source of webPlaybackSources) {
+        try { source.stop(); } catch { /* already ended */ }
+        try { source.disconnect(); } catch { /* already disconnected */ }
+      }
+      webPlaybackSources.clear();
+      webPlaybackNextTime = 0;
+      pendingWebPcm.length = 0;
+      pendingWebPcmBytes = 0;
+    };
+    const playWebPcmNow = (bytes) => {
+      if (!audioOutputTargets.web || !webPlaybackContext || webPlaybackContext.state !== 'running') return;
+      const samples = new Int16Array(bytes);
+      const buffer = webPlaybackContext.createBuffer(1, samples.length, 24000);
+      const channel = buffer.getChannelData(0);
+      for (let index = 0; index < samples.length; index += 1) channel[index] = samples[index] < 0 ? samples[index] / 32768 : samples[index] / 32767;
+      const source = webPlaybackContext.createBufferSource();
+      source.buffer = buffer;
+      source.connect(webPlaybackContext.destination);
+      const start = Math.max(webPlaybackContext.currentTime + .015, webPlaybackNextTime);
+      webPlaybackNextTime = start + buffer.duration;
+      webPlaybackSources.add(source);
+      source.onended = () => {
+        webPlaybackSources.delete(source);
+        try { source.disconnect(); } catch { /* already disconnected */ }
+      };
+      source.start(start);
+    };
+    const flushWebPcmQueue = () => {
+      if (!audioOutputTargets.web || !webPlaybackContext || webPlaybackContext.state !== 'running') return;
+      while (pendingWebPcm.length) {
+        const bytes = pendingWebPcm.shift();
+        pendingWebPcmBytes -= bytes.byteLength;
+        playWebPcmNow(bytes);
+      }
+    };
+    const resumeWebPlayback = async () => {
+      if (!webPlaybackContext || webPlaybackContext.state === 'closed') return;
+      if (webPlaybackContext.state !== 'running') {
+        if (!webPlaybackResumePromise) {
+          webPlaybackResumePromise = webPlaybackContext.resume().finally(() => { webPlaybackResumePromise = null; });
+        }
+        await webPlaybackResumePromise;
+      }
+      flushWebPcmQueue();
+    };
+    const playWebPcm = (data) => {
+      if (!audioOutputTargets.web) return;
+      const bytes = copyPcmBuffer(data);
+      if (!bytes || bytes.byteLength < 2 || bytes.byteLength % 2 !== 0) return;
+      try {
+        if (!webPlaybackContext) getWebPlaybackContext();
+      } catch {
+        return;
+      }
+      if (webPlaybackContext.state !== 'running') {
+        queueWebPcm(bytes);
+        void resumeWebPlayback().catch(() => undefined);
+        return;
+      }
+      playWebPcmNow(bytes);
+    };
+    const openManagementSocket = () => {
+      if (managementSocket && managementSocket.readyState === WebSocket.OPEN) return Promise.resolve(managementSocket);
+      if (managementSocketPromise) return managementSocketPromise;
       const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
       const socket = new WebSocket(scheme + '://' + location.host + '/v1/management-audio');
       socket.binaryType = 'arraybuffer';
-      socket.onopen = () => { managementSocket = socket; resolve(socket); };
-      socket.onerror = () => reject(new Error('无法连接 Bridge 管理音频通道'));
-    });
+      let promise;
+      promise = new Promise((resolve, reject) => {
+        socket.onopen = () => { managementSocket = socket; resolve(socket); };
+        socket.onerror = () => reject(new Error('无法连接 Bridge 管理音频通道'));
+        socket.onmessage = (event) => {
+          if (!audioOutputTargets.web) return;
+          if (event.data instanceof ArrayBuffer) playWebPcm(event.data);
+          else if (event.data instanceof Blob) void event.data.arrayBuffer().then(playWebPcm);
+        };
+        socket.onclose = () => { if (managementSocket === socket) managementSocket = null; };
+      });
+      managementSocketPromise = promise;
+      const clearPromise = () => { if (managementSocketPromise === promise) managementSocketPromise = null; };
+      promise.then(clearPromise, clearPromise);
+      return promise;
+    };
+    const prepareWebPlayback = async () => {
+      if (!audioOutputTargets.web) return;
+      const context = getWebPlaybackContext();
+      const socketPromise = openManagementSocket();
+      if (context.state !== 'running') await resumeWebPlayback();
+      await socketPromise;
+      flushWebPcmQueue();
+    };
+    const wakeWebPlayback = () => {
+      if (!audioOutputTargets.web) return;
+      try {
+        if (!webPlaybackContext) getWebPlaybackContext();
+        void prepareWebPlayback().catch(() => undefined);
+      } catch { /* browser may not expose Web Audio */ }
+    };
+    ['pointerdown', 'keydown', 'touchstart'].forEach((eventName) => document.addEventListener(eventName, wakeWebPlayback, { passive: true }));
+    window.addEventListener('focus', wakeWebPlayback);
+    window.addEventListener('pageshow', wakeWebPlayback);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) wakeWebPlayback(); });
     const stopMacCapture = async () => {
       const capture = macCapture;
       macCapture = null;
@@ -538,8 +750,8 @@ const managementPage = `<!doctype html>
       capture.silentGain.disconnect();
       capture.stream.getTracks().forEach((track) => track.stop());
       if (capture.context.state !== 'closed') await capture.context.close();
-      if (capture.socket.readyState === WebSocket.OPEN) capture.socket.close(1000, 'audio test stopped');
-      if (managementSocket === capture.socket) managementSocket = null;
+      if (!audioOutputTargets.web && capture.socket.readyState === WebSocket.OPEN) capture.socket.close(1000, 'audio test stopped');
+      if (!audioOutputTargets.web && managementSocket === capture.socket) managementSocket = null;
     };
     const startMacCapture = async () => {
       if (macCapture) return;
@@ -581,7 +793,7 @@ const managementPage = `<!doctype html>
       let captureStarted = false;
       try {
         let browserCapture = false;
-        if (inputControl.value === 'mac') {
+        if (getInputSource() === 'mac') {
           try {
             await startMacCapture();
             captureStarted = true;
@@ -594,8 +806,8 @@ const managementPage = `<!doctype html>
         const value = await response.json();
         if (!response.ok) throw new Error(value.error || '麦克风打开失败');
         updateMeters(value);
-        if (inputControl.value === 'mac' && macCapture) macCapture.socket.send(JSON.stringify({ type: 'device', label: macCapture.deviceLabel || '网页麦克风' }));
-        showAction(browserCapture ? '麦克风已打开，可以说话' : inputControl.value === 'visor' ? '麦克风已打开，请使用眼镜 PTT' : '麦克风已打开，等待原生麦克风输入');
+        if (getInputSource() === 'mac' && macCapture) macCapture.socket.send(JSON.stringify({ type: 'device', label: macCapture.deviceLabel || '网页麦克风' }));
+        showAction(browserCapture ? '麦克风已打开，可以说话' : getInputSource() === 'visor' ? '麦克风已打开，请使用眼镜 PTT' : '麦克风已打开，等待原生麦克风输入');
       } catch (error) {
         if (captureStarted) await stopMacCapture().catch(() => undefined);
         showAction('麦克风打开失败：' + (error.message || String(error)));
@@ -604,6 +816,13 @@ const managementPage = `<!doctype html>
     const updateMeters = (value) => {
       const input = value.input || {};
       const output = value.output || {};
+      if (audioSettingsWriteInFlight === 0 && value.audioInputSource) setInputSource(value.audioInputSource);
+      if (audioSettingsWriteInFlight === 0 && value.audioOutputTargets) {
+        const nextOutputs = normalizeAudioOutputTargets(value.audioOutputTargets);
+        const webWasEnabled = audioOutputTargets.web;
+        if (!audioOutputTargetsEqual(audioOutputTargets, nextOutputs)) setAudioOutputTargets(nextOutputs);
+        if (!webWasEnabled && nextOutputs.web) void prepareWebPlayback().catch(() => undefined);
+      }
       voiceChatActive = value.voiceChatActive === true;
       const phase = value.voiceChatPhase || (voiceChatActive ? 'connected' : 'stopped');
       const phaseLabels = { starting: '拨号中', connected: '已接通', stopping: '挂断中', stopped: '未接通', error: '通话错误' };
@@ -619,7 +838,7 @@ const managementPage = `<!doctype html>
       inputStatus.textContent = input.active
         ? '有声音'
         : value.testActive
-          ? (inputFrames > 0 ? '已收到输入帧，等待有效声音' : (inputControl.value === 'visor' ? '未收到眼镜音频，请使用眼镜 PTT' : '未收到电脑麦克风'))
+          ? (inputFrames > 0 ? '已收到输入帧，等待有效声音' : (getInputSource() === 'visor' ? '未收到眼镜音频，请使用眼镜 PTT' : '未收到电脑麦克风'))
           : (inputFrames > 0 ? '测试已停止，已收到 ' + inputFrames + ' 帧' : '未采集');
       renderVoiceEvents(value.voiceEvents);
       testActive = value.testActive === true;
@@ -639,8 +858,7 @@ const managementPage = `<!doctype html>
       voiceChatButton.setAttribute('aria-label', connected ? '挂断电话' : '拨打电话');
       voiceChatButtonLabel.textContent = connected ? '挂断电话' : phase === 'starting' ? '拨号中...' : '拨打电话';
       voiceTargetControl.disabled = phase === 'connected' || phase === 'starting' || phase === 'stopping';
-      inputControl.disabled = !connected;
-      outputControl.disabled = !connected;
+      setAudioControlsDisabled(audioSettingsWriteInFlight > 0 || !connected);
       sampleButton.disabled = !connected || testActive;
       sampleButtonLabel.textContent = voiceTurnActive
         ? (pendingSample ? '链路信号已排队' : '等待上一轮 · 注入信号')
@@ -663,67 +881,127 @@ const managementPage = `<!doctype html>
       }
     };
     const updateStatus = (value) => {
-      inputControl.value = value.audioInputSource || 'visor';
-      outputControl.value = value.localAudioOutput || 'visor_only';
+      setInputSource(value.audioInputSource || 'mac');
+      setAudioOutputTargets(value.audioOutputTargets || {});
       status.textContent = audioSummary();
     };
     async function load() {
       const response = await fetch('/api/settings', { cache: 'no-store' });
       updateStatus(await response.json());
+      if (audioOutputTargets.web) void prepareWebPlayback().catch(() => undefined);
       const targets = await fetch('/api/voice-chat/targets', { cache: 'no-store' });
       if (!targets.ok) throw new Error('无法读取 Codex 会话列表');
       updateVoiceTargetState(await targets.json());
     }
     async function pollVoiceTargets() {
+      if (voiceTargetMenuOpen || voiceTargetPollInFlight) return;
+      voiceTargetPollInFlight = true;
       try {
         const response = await fetch('/api/voice-chat/targets', { cache: 'no-store' });
         if (response.ok) updateVoiceTargetState(await response.json());
       } catch { /* bridge may be restarting */ }
+      finally { voiceTargetPollInFlight = false; }
     }
     async function saveSettings() {
-      inputControl.disabled = true;
-      outputControl.disabled = true;
-      const response = await fetch('/api/settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ audioInputSource: inputControl.value, localAudioOutput: outputControl.value }) });
-      const value = await response.json();
-      inputControl.disabled = false;
-      outputControl.disabled = false;
-      if (!response.ok) throw new Error(value.error || '设置失败');
-      updateStatus(value);
+      const writeVersion = ++audioSettingsWriteVersion;
+      audioSettingsWriteInFlight += 1;
+      setAudioControlsDisabled(true);
+      try {
+        const response = await fetch('/api/settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ audioInputSource: getInputSource(), audioOutputTargets: getAudioOutputTargets() }) });
+        const value = await response.json();
+        if (!response.ok) throw new Error(value.error || '设置失败');
+        if (writeVersion === audioSettingsWriteVersion) updateStatus(value);
+      } finally {
+        audioSettingsWriteInFlight = Math.max(0, audioSettingsWriteInFlight - 1);
+        setAudioControlsDisabled(audioSettingsWriteInFlight > 0 || !voiceChatActive);
+      }
     }
-    inputControl.addEventListener('change', () => { actionMessage = ''; saveSettings().catch((error) => showAction(error.message)); });
-    outputControl.addEventListener('change', () => { actionMessage = ''; saveSettings().catch((error) => showAction(error.message)); });
+    inputOptions.forEach((option) => option.addEventListener('change', () => { actionMessage = ''; saveSettings().catch((error) => showAction(error.message)); }));
+    outputControls.forEach((control) => control.addEventListener('click', async () => {
+      if (control.disabled) return;
+      const previous = getAudioOutputTargets();
+      const key = control.dataset.audioOutput;
+      const next = { ...previous };
+      next[key] = !next[key];
+      setAudioOutputTargets(next);
+      actionMessage = '';
+      try {
+        if (next.web) await prepareWebPlayback();
+        await saveSettings();
+      } catch (error) {
+        setAudioOutputTargets(previous);
+        if (previous.web) void prepareWebPlayback().catch(() => undefined);
+        showAction(error.message || String(error));
+      }
+    }));
+    voiceTargetControl.addEventListener('focus', () => { voiceTargetMenuOpen = true; });
+    voiceTargetControl.addEventListener('blur', () => {
+      voiceTargetMenuOpen = false;
+      window.setTimeout(() => { void pollVoiceTargets(); }, 0);
+    });
     voiceTargetControl.addEventListener('change', async () => {
       const target = voiceTargetControl.value;
-      if (!target) return;
+      if (!target) {
+        pendingNewVoiceTarget = false;
+        voiceTargetSelectionReady = false;
+        return;
+      }
+      if (target === '__new__') {
+        pendingNewVoiceTarget = true;
+        voiceTargetSelectionReady = true;
+        showAction('已选择新建 Codex 会话，点击“拨打电话”后才会创建。');
+        return;
+      }
+      pendingNewVoiceTarget = false;
+      voiceTargetSelectionReady = true;
       voiceTargetControl.disabled = true;
       try {
         const response = await fetch('/api/voice-chat/target', {
           method: 'PUT',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(target === '__new__' ? { newSession: true } : { threadId: target }),
+          body: JSON.stringify({ threadId: target }),
         });
         const value = await response.json();
         if (!response.ok) throw new Error(value.error || '通话目标切换失败');
         updateVoiceTargetState(value);
         showAction('通话目标已锁定为：' + (voiceTargetControl.selectedOptions[0]?.textContent || '新会话'));
       } catch (error) {
+        voiceTargetSelectionReady = false;
         showAction(error.message || String(error));
         await pollVoiceTargets();
       }
     });
+    const createNewVoiceTargetForDial = async () => {
+      const response = await fetch('/api/voice-chat/target', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ newSession: true }),
+      });
+      const value = await response.json();
+      if (!response.ok) throw new Error(value.error || '新 Codex 会话创建失败');
+      pendingNewVoiceTarget = false;
+      updateVoiceTargetState(value);
+    };
     voiceChatButton.addEventListener('click', async () => {
       const starting = !voiceChatActive;
-      if (starting && !voiceTargetControl.value) {
+      if (starting && (!voiceTargetSelectionReady || !voiceTargetControl.value)) {
         showAction('请先选择要拨打的 Codex 会话，或新建会话。');
         return;
       }
       voiceChatButton.disabled = true;
-      if (starting) {
-        beginDialTone();
-        autoOpenMicAfterDial = true;
-      }
-      voiceChatStatus.textContent = starting ? '正在启动 Voice Chat...' : '正在挂断 Voice Chat...';
       try {
+        if (starting && voiceTargetControl.value === '__new__') {
+          voiceChatStatus.textContent = '正在创建 Codex 会话...';
+          await createNewVoiceTargetForDial();
+        }
+        if (starting) {
+          beginDialTone();
+          autoOpenMicAfterDial = true;
+          if (audioOutputTargets.web) {
+            try { await prepareWebPlayback(); } catch (error) { showAction('网页播放通道暂不可用：' + (error.message || String(error))); }
+          }
+        }
+        voiceChatStatus.textContent = starting ? '正在启动 Voice Chat...' : '正在挂断 Voice Chat...';
         const response = await fetch(starting ? '/api/voice-chat/start' : '/api/voice-chat/stop', { method: 'POST' });
         const value = await response.json();
         if (!response.ok) throw new Error(value.error || 'Voice Chat 控制失败');
@@ -781,8 +1059,8 @@ const managementPage = `<!doctype html>
       const starting = !testActive;
       let captureStarted = false;
       try {
-        showAction(starting && inputControl.value === 'mac' ? '正在打开电脑麦克风...' : (starting ? '正在打开麦克风...' : '正在关闭麦克风并发送这一轮...'));
-        if (starting && inputControl.value === 'mac') {
+        showAction(starting && getInputSource() === 'mac' ? '正在打开电脑麦克风...' : (starting ? '正在打开麦克风...' : '正在关闭麦克风并发送这一轮...'));
+        if (starting && getInputSource() === 'mac') {
           try {
             await startMacCapture();
             captureStarted = true;
@@ -795,11 +1073,11 @@ const managementPage = `<!doctype html>
         const value = await response.json();
         if (!response.ok) throw new Error(value.error || '音频测试失败');
         updateMeters(value);
-        if (starting && inputControl.value === 'mac' && macCapture) {
+        if (starting && getInputSource() === 'mac' && macCapture) {
           macCapture.socket.send(JSON.stringify({ type: 'device', label: macCapture.deviceLabel || '网页麦克风' }));
         }
         showAction(starting
-          ? (inputControl.value === 'visor' ? '麦克风已打开，请使用眼镜 PTT' : '麦克风已打开，可以说话')
+          ? (getInputSource() === 'visor' ? '麦克风已打开，请使用眼镜 PTT' : '麦克风已打开，可以说话')
           : '麦克风已关闭，这一轮已发送');
       } catch (error) {
         if (captureStarted) await stopMacCapture().catch(() => undefined);

@@ -46,7 +46,7 @@ func TestHTTPManagementAndHealthRoutes(t *testing.T) {
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("management page status: %d", response.StatusCode)
 	}
-	for _, marker := range []string{"CodeX Commander Bridge 音频诊断", "signal-rail", "call-orb", "voiceTarget"} {
+	for _, marker := range []string{"CodeX Commander Bridge 音频诊断", "signal-rail", "call-orb", "voiceTarget", "BRIDGE 本地", "指挥中心网页", "INMO AIR3", "audioOutputTargets"} {
 		if !strings.Contains(string(page), marker) {
 			t.Fatalf("management page missing legacy marker %q", marker)
 		}
@@ -72,6 +72,28 @@ func TestHTTPManagementAndHealthRoutes(t *testing.T) {
 	_ = response.Body.Close()
 	if response.StatusCode != http.StatusOK || settings["audioInputSource"] != "mac" {
 		t.Fatalf("unexpected settings response: status=%d body=%#v", response.StatusCode, settings)
+	}
+
+	request, err := http.NewRequest(http.MethodPut, httpServer.URL+"/api/settings", strings.NewReader(`{"audioInputSource":"visor","audioOutputTargets":{"bridge":false,"web":true,"visor":false}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("content-type", "application/json")
+	response, err = http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var updated map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&updated); err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusOK || updated["audioInputSource"] != "visor" {
+		t.Fatalf("unexpected updated settings response: status=%d body=%#v", response.StatusCode, updated)
+	}
+	outputs, ok := updated["audioOutputTargets"].(map[string]any)
+	if !ok || outputs["bridge"] != false || outputs["web"] != true || outputs["visor"] != false {
+		t.Fatalf("unexpected updated output targets: %#v", updated["audioOutputTargets"])
 	}
 
 	response, err = http.Post(httpServer.URL+"/api/settings", "application/json", nil)
@@ -138,19 +160,19 @@ func testConfig(t *testing.T) config.Config {
 	t.Helper()
 	root := t.TempDir()
 	return config.Config{
-		Host:             "127.0.0.1",
-		Port:             8787,
-		CWD:              root,
-		PairingFile:      filepath.Join(root, "data", "pairing.json"),
-		MediaRoot:        filepath.Join(root, "media"),
-		MediaRoots:       []string{root},
-		AppServerMode:    "gui_shared",
-		AppServerSocket:  filepath.Join(root, "missing.sock"),
-		CodexBin:         "codex",
-		AudioInputSource: "mac",
-		LocalAudioOutput: "mac_and_visor",
-		RealtimeIdleMS:   60_000,
-		Version:          "test",
+		Host:               "127.0.0.1",
+		Port:               8787,
+		CWD:                root,
+		PairingFile:        filepath.Join(root, "data", "pairing.json"),
+		MediaRoot:          filepath.Join(root, "media"),
+		MediaRoots:         []string{root},
+		AppServerMode:      "gui_shared",
+		AppServerSocket:    filepath.Join(root, "missing.sock"),
+		CodexBin:           "codex",
+		AudioInputSource:   "mac",
+		AudioOutputTargets: config.AudioOutputTargets{Bridge: true, Visor: true},
+		RealtimeIdleMS:     60_000,
+		Version:            "test",
 	}
 }
 

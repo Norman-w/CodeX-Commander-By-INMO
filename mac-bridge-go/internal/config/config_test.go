@@ -29,8 +29,34 @@ func TestLoadFromDefaultsAndValidation(t *testing.T) {
 	if c.CWD != resolvedRoot || c.Port != 8787 || c.Host != "127.0.0.1" || !c.AutoSelectLatest || c.NetworkAccess {
 		t.Fatalf("unexpected defaults: %#v", c)
 	}
-	if c.AppServerMode != "gui_shared" || c.RealtimeTransport != "auto" || c.RealtimeVoice != "juniper" || c.AudioInputSource != "mac" || c.LocalAudioOutput != "mac_and_visor" {
+	if c.AppServerMode != "gui_shared" || c.RealtimeTransport != "auto" || c.RealtimeVoice != "juniper" || c.AudioInputSource != "mac" || c.AudioOutputTargets != (AudioOutputTargets{Bridge: true, Visor: true}) {
 		t.Fatalf("unexpected bridge defaults: %#v", c)
+	}
+}
+
+func TestParseAudioOutputTargets(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want AudioOutputTargets
+	}{
+		{name: "all", raw: "bridge,web,visor", want: AudioOutputTargets{Bridge: true, Web: true, Visor: true}},
+		{name: "none", raw: "none", want: AudioOutputTargets{}},
+		{name: "trim and deduplicate", raw: " bridge,visor,bridge ", want: AudioOutputTargets{Bridge: true, Visor: true}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := ParseAudioOutputTargets(test.raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != test.want {
+				t.Fatalf("got %#v, want %#v", got, test.want)
+			}
+		})
+	}
+	if _, err := ParseAudioOutputTargets("speakers"); err == nil {
+		t.Fatal("expected unknown output target to fail")
 	}
 }
 
